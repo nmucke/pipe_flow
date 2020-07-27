@@ -213,7 +213,7 @@ class Gauss(RungeKutta_implicit): #order 6
     b=[5/18,4/9,5/18]
     c=[1/2-np.sqrt(15)/10,1/2,1/2+np.sqrt(15)/10]
 
-N = 50
+N = 250
 t0, te = 0, 5.
 tol_newton = 1e-9
 tol_sol = 1e-5
@@ -233,7 +233,7 @@ def jacobian(t,y):
     Jacobian = np.array([[0, 1], [-g/L*np.cos(y[0]), 0]])
     return Jacobian
 
-system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,0]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
+system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
 
 system.solve()
 time,solution = system.time,system.solution
@@ -247,15 +247,15 @@ print('The mean error: {}'.format(error))
 
 
 plt.figure()
-plt.plot(solution[1,:],solution[0,:],'-',linewidth=2.)
+plt.plot(solution[0,:],solution[1,:],'-',linewidth=2.)
 #plt.plot(time,solution[1,:],'.-', markersize=5,linewidth=2.)
 
 
 
-N = 25
+N = 200
 timeGrid = np.linspace(t0,te,N+2) #N interior points
 
-system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,0]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
+system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
 
 system.solve()
 time,solution = system.time,system.solution
@@ -267,5 +267,6 @@ y_true = np.stack((y1,y2),axis=0)
 error = np.linalg.norm(y_true - solution)
 print('The mean error: {}'.format(error))
 
-plt.plot(solution[1,:],solution[0,:],'--',linewidth=2.)
+plt.plot(solution[0,:],solution[1,:],'--',linewidth=2.)
+
 plt.show()

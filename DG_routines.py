@@ -235,11 +235,11 @@ class DG_1D:
         return EtoE, EtoF
 
     def GeometricFactors(self):
-            xr = np.dot(self.Dr, self.x)
-            J = xr
-            rx = np.divide(1, J)
+        xr = np.dot(self.Dr, self.x)
+        J = xr
+        rx = np.divide(1, J)
 
-            return rx, J
+        return rx, J
 
     def StartUp(self):
 
@@ -414,7 +414,6 @@ class DG_1D:
         q2FluxIn = q1[self.vmapI] * np.power(uIn, 2) + pressure[self.vmapI]
         q1FluxOut = q2out
         q2FluxOut = q1[self.vmapO] * np.power(uOut, 2) + pressure[self.vmapO]
-
 
         dq1Flux[self.mapI] = np.dot(nx[self.mapI],q1Flux[self.vmapI]-q1FluxIn)/2
         dq2Flux[self.mapI] = np.dot(nx[self.mapI],q2Flux[self.vmapI]-q2FluxIn)/2 - np.dot(C,q2[self.vmapI]-q2in)
