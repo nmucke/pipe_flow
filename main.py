@@ -36,7 +36,7 @@ def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
     anim.save(gif_name + '.mp4',writer=writer)
 
 N = 2
-K = 1000
+K = 200
 
 xmin = 0.
 xmax = 100.
@@ -72,7 +72,7 @@ sigma = .01
 q2init = np.zeros((N+1,K))
 q1init = rho0*np.ones((N+1,K))
 
-solq1,solq2, time = DG_model_pipe.Pipe1D(q1init,q2init, FinalTime=.2,c=c,rho0=rho0,p0=p0,xl=xl,tl=tl,implicit=True)
+solq1,solq2, time = DG_model_pipe.Pipe1D(q1init,q2init, FinalTime=.2,c=c,rho0=rho0,p0=p0,xl=xl,tl=tl,implicit=False)
 #%%
 rho = []
 u = []
