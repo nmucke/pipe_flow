@@ -6,7 +6,7 @@ import scipy.special as sci
 import scipy.sparse as sps
 import scipy.integrate as integrate
 import time as timing
-import RungeKutta as RK
+import RungeKuttaNew as RK
 
 
 def JacobiP(x,alpha,beta,N):

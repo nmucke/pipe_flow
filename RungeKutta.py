@@ -2,6 +2,11 @@ import numpy as np
 import pdb
 import scipy.linalg as scilin
 import matplotlib.pyplot as plt
+#import DG_routines as DG
+import scipy.optimize as opt
+
+
+
 
 class Onestepmethod(object):
     def __init__(self,f,y0,t0,te,N,jacobian,tol):
@@ -21,7 +26,6 @@ class Onestepmethod(object):
         t, y = [self.grid[0]], [self.y0]  # initial condition
         tim1 = t[0]
         yi = y[0]
-
         for ti in self.grid[1:]:
             yi = yi + self.h * self.phi(tim1, yi)
             tim1 = ti
@@ -52,6 +56,8 @@ class RungeKutta_implicit(Onestepmethod):
         J = self.jacobian(t0, y0)
         stageVal = self.phi_solve(t0, y0, stageDer, J, M)
 
+        lol = np.array([np.dot(self.b, stageVal.reshape(self.s, self.m)[:,j]) for j in range(self.m)])
+
         return np.array([np.dot(self.b, stageVal.reshape(self.s, self.m)[:,j]) for j in range(self.m)])
 
 
@@ -71,8 +77,9 @@ class RungeKutta_implicit(Onestepmethod):
         M = maximal number of Newton iterations
         Returns:
         -------------
-        The stage derivative Y’_i
+        The stage value Y_i
         """
+
 
         JJ = np.eye(self.s * self.m) - self.h * np.kron(self.A, J)
         luFactor = scilin.lu_factor(JJ)
@@ -105,6 +112,7 @@ class RungeKutta_implicit(Onestepmethod):
         """
 
         d = scilin.lu_solve(luFactor, - self.F(initVal.flatten(),t0, y0))
+
 
         return initVal.flatten() + d, np.linalg.norm(d)
 
@@ -151,6 +159,17 @@ class SDIRK(RungeKutta_implicit):
         -------------
         The stage derivative Y’_i
         """
+        """
+        for i in range(self.s):  # solving the s mxm systems
+            rhs = - self.F(initVal.flatten(), t0,y0)[i * self.m:(i + 1) * self.m] \
+                  +np.sum([self.h * self.A[i, j] * np.dot(J, x[j]) for j in range(i)], axis=0)
+
+            def RHS(y0):
+                return - self.F(initVal.flatten(), t0,y0)[i * self.m:(i + 1) * self.m] \
+                  +np.sum([self.h * self.A[i, j] * np.dot(J, x[j]) for j in range(i)], axis=0)
+
+            initVal = opt.newton_krylov(RHS, y0)
+        """
         JJ = np.eye(self.m) - self.h * self.A[0, 0] * J
         luFactor = scilin.lu_factor(JJ)
         for i in range(M):
@@ -161,6 +180,7 @@ class SDIRK(RungeKutta_implicit):
 
             elif i == M - 1:
                 raise ValueError('The Newton iteration did not converge.')
+
 
         return initVal
 
@@ -188,7 +208,9 @@ class SDIRK(RungeKutta_implicit):
             rhs = - self.F(initVal.flatten(), t0,y0)[i * self.m:(i + 1) * self.m] \
                   +np.sum([self.h * self.A[i, j] * np.dot(J, x[j]) for j in range(i)], axis=0)
             d = scilin.lu_solve(luFactor, rhs)
+
             x.append(d)
+
         return initVal + x, np.linalg.norm(x)
 
 
