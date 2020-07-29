@@ -120,14 +120,12 @@ def diracDelta(x):
     return f
 
 class DG_1D:
-    def __init__(self, xmin=0,xmax=1,K=10,N=5,diameter = 0.5):
+    def __init__(self, xmin=0,xmax=1,K=10,N=5):
         self.xmin = xmin
         self.xmax = xmax
         self.K = K
         self.N = N
         self.Np = N + 1
-        self.diameter = diameter
-        self.A = (diameter/2)**2 * np.pi
 
         self.NODETOL = 1e-10
         self.Nfp = 1
@@ -316,6 +314,17 @@ class DG_1D:
 
         return ulimit
 
+class Pipe1D(DG_1D):
+    def __init__(self, xmin=0,xmax=1,K=10,N=5,c=1400,rho0=1000,p0=1e5, diameter=0.5):
+        DG_1D.__init__(self, xmin=xmin,xmax=xmax,K=K,N=N)
+        self.c = c
+        self.rho0 = rho0
+        self.p0 = p0
+        self.diameter = diameter
+        self.A = (diameter/2)**2 * np.pi
+
+
+
     def f_leak(self,time,xElementL,tl):
 
         f_l = np.zeros((self.x.shape))
@@ -331,7 +340,7 @@ class DG_1D:
         q1 = q1.flatten('F')
         q2 = q2.flatten('F')
 
-        f_l = DG_1D.f_leak(self, time, self.xElementL, self.tl)
+        f_l = Pipe1D.f_leak(self, time, self.xElementL, self.tl)
 
         u = np.divide(q2,q1)
 
@@ -379,22 +388,24 @@ class DG_1D:
 
         return rhsq1,rhsq2,
 
-    def PipeRHS1DImplicit(time,q,c,rho0,p0,self):
+    def PipeRHS1DImplicit(self,time,q):
 
         q1 = q[0:int(len(q)/2)]
         q2 = q[-int(len(q)/2):]
 
+        q1 = q1.flatten('F')
+        q2 = q2.flatten('F')
 
-        f_l = DG_1D.f_leak(self, time, self.xElementL, self.tl)
+        f_l = Pipe1D.f_leak(self, time, self.xElementL, self.tl)
 
         u = np.divide(q2,q1)
 
-        pressure = c*c*(q1-rho0) + p0
+        pressure = self.c*self.c*(q1-self.rho0) + self.p0
 
         q1Flux = q2
         q2Flux = q1*np.power(u,2) + pressure
 
-        lam = np.max(np.abs(np.concatenate((u + c, u - c))))
+        lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
 
         C = np.max(lam)
 
@@ -414,6 +425,7 @@ class DG_1D:
         q2FluxIn = q1[self.vmapI] * np.power(uIn, 2) + pressure[self.vmapI]
         q1FluxOut = q2out
         q2FluxOut = q1[self.vmapO] * np.power(uOut, 2) + pressure[self.vmapO]
+
 
         dq1Flux[self.mapI] = np.dot(nx[self.mapI],q1Flux[self.vmapI]-q1FluxIn)/2
         dq2Flux[self.mapI] = np.dot(nx[self.mapI],q2Flux[self.vmapI]-q2FluxIn)/2 - np.dot(C,q2[self.vmapI]-q2in)
@@ -460,7 +472,7 @@ class DG_1D:
             dt = CFL * mindeltax / C
 
             for INTRK in range(0, 5):
-                rhsq1, rhsq2 = DG_1D.PipeRHS1D(self, time, q1, q2)
+                rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1, q2)
 
                 resq1 = self.rk4a[INTRK] * resq1 + dt * rhsq1
                 resq2 = self.rk4a[INTRK] * resq2 + dt * rhsq2
@@ -502,56 +514,33 @@ class DG_1D:
 
         return solq1, solq2, tVec
 
-
-
     def ImplicitIntegration(self,q1,q2,FinalTime):
 
         time = 0
 
-        mindeltax = np.min(np.abs(self.x[0,:]-self.x[1,:]))
+        initCondition = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
-        CFL = .8
+        system = RK.SDIRK_tableau2s(lambda t, y: rhs(t, y), np.array([np.pi / 2., 10]), t0, te, N, tol_newton)
 
-        solq1 = [q1]
-        solq2 = [q2]
-        tVec = [time]
-
-
-        resq1 = np.zeros((self.Np,self.K))
-        resq2 = np.zeros((self.Np,self.K))
-
-
-        while time < FinalTime:
-
-            solq1.append(q1)
-            solq2.append(q2)
-
-            time = time + dt
-            tVec.append(time)
+        system.solve()
+        t_vec, solution = system.time, system.solution
 
         return solq1, solq2, tVec
 
+    def solve(self, q1,q2, FinalTime,xl,tl,implicit=False):
 
-    def Pipe1D(self, q1,q2, FinalTime,c,rho0,p0,xl,tl,implicit=False):
-
-        self.c = c
-        self.rho0 = rho0
-        self.p0 = p0
 
         self.tl = tl
         self.xElementL = np.int(xl/self.xmax * self.K)
-
 
         q1 = DG_1D.SlopeLimitN(self,q1)
         q2 = DG_1D.SlopeLimitN(self,q2)
 
         t0 = timing.time()
         if implicit:
-            initCondition = np.concatenate((q1.flatten('F'),q2.flatten('F')),axis=0)
-            sol = integrate.solve_ivp(DG_1D.PipeRHS1DImplicit, t_span=[0,FinalTime], y0=initCondition,
-                                      method='BDF',args=(c, rho0, p0,self))
+
         else:
-            solq1, solq2, tVec = DG_1D.ExplicitIntegration(self,q1,q2,FinalTime)
+            solq1, solq2, tVec = Pipe1D.ExplicitIntegration(self,q1,q2,FinalTime)
         t1 = timing.time()
 
         print('Simulation finished \nTime: {:.2f} seconds'.format(t1-t0))

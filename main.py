@@ -33,7 +33,7 @@ def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
                                    frames=len(sol_list), interval=20, blit=True)
 
     # save the animation as mp4 video file
-    anim.save(gif_name + '.mp4',writer=writer)
+    anim.save(gif_name + '.avi',writer=writer)
 
 N = 2
 K = 200
@@ -47,7 +47,7 @@ p0 = 1e5
 
 diameter = 0.03568248232
 
-DG_model_pipe = DG.DG_1D(xmin=xmin, xmax=xmax, K=K, N=N, diameter=diameter)
+DG_model_pipe = DG.Pipe1D(xmin=xmin,xmax=xmax,K=K,N=N,c=c,rho0=rho0,p0=p0, diameter=diameter)
 DG_model_pipe.StartUp()
 
 xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
@@ -59,20 +59,13 @@ mu1 = 50.
 mu2 = 60
 sigma = .01
 #q1init =  3 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2))
-#q1init +=  3 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu2) / sigma, 2))
-#q1init += np.random.normal(0,1,q1init.shape)
 #q1init += rho0
 
-
-#q2init = np.zeros((N+1,K))
-
-#q1init = np.zeros(DG_model_pipe.x.shape)
-#q1init[np.argwhere(DG_model_pipe.x>=20)[:,0],np.argwhere(DG_model_pipe.x>=20)[:,1]] =rho0 + 1.25
-#q1init[np.argwhere(DG_model_pipe.x<20)[:,0],np.argwhere(DG_model_pipe.x<20)[:,1]] = rho0 + 3.5
-q2init = np.zeros((N+1,K))
 q1init = rho0*np.ones((N+1,K))
 
-solq1,solq2, time = DG_model_pipe.Pipe1D(q1init,q2init, FinalTime=.2,c=c,rho0=rho0,p0=p0,xl=xl,tl=tl,implicit=False)
+q2init = np.zeros((N+1,K))
+
+solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=.2,xl=xl,tl=tl,implicit=False)
 #%%
 rho = []
 u = []

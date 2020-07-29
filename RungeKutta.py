@@ -4,7 +4,8 @@ import scipy.linalg as scilin
 import matplotlib.pyplot as plt
 #import DG_routines as DG
 import scipy.optimize as opt
-
+import scipy.sparse.linalg as spla
+import time as timing
 
 
 
@@ -86,7 +87,7 @@ class RungeKutta_implicit(Onestepmethod):
         for i in range(M):
             initVal, norm_d = self.phi_newtonstep(t0, y0, initVal,luFactor)
             if norm_d < self.tol:
-                print('Newton converged in {} steps'.format(i))
+                #print('Newton converged in {} steps'.format(i))
                 break
             elif i == M - 1:
                 raise ValueError('The Newton iteration did not converge.')
@@ -141,6 +142,7 @@ class RungeKutta_implicit(Onestepmethod):
 
 
 class SDIRK(RungeKutta_implicit):
+
     def phi_solve(self, t0, y0, initVal, J, M):
         """
         This function solves F(Y_i)=0 by solving s systems of size m
@@ -175,14 +177,17 @@ class SDIRK(RungeKutta_implicit):
         for i in range(M):
             initVal, norm_d = self.phi_newtonstep(t0, y0, initVal, J,luFactor)
             if norm_d < self.tol:
-                print('Newton converged in {} steps'.format(i))
+                #print('Newton converged in {} steps'.format(i))
                 break
 
             elif i == M - 1:
                 raise ValueError('The Newton iteration did not converge.')
 
-
         return initVal
+
+    def JacobianProduct(self,yk,ydelta):
+        epsilon = 1/(np.linalg.norm(ydelta)+np.finfo(float).eps) * (np.finfo(float).eps/2)**(1/3)
+        return 0.5*(self.f(self.t0,yk+epsilon*ydelta)-self.f(self.t0,yk-epsilon*ydelta))/epsilon
 
     def phi_newtonstep(self, t0, y0, initVal, J, luFactor):
         """
@@ -203,13 +208,30 @@ class SDIRK(RungeKutta_implicit):
         The difference Y^(n+1)_i-Y^(n)_i
         """
 
+
         x = []
         for i in range(self.s):  # solving the s mxm systems
+            '''
             rhs = - self.F(initVal.flatten(), t0,y0)[i * self.m:(i + 1) * self.m] \
                   +np.sum([self.h * self.A[i, j] * np.dot(J, x[j]) for j in range(i)], axis=0)
             d = scilin.lu_solve(luFactor, rhs)
+            print(d)
+            '''
+
+            Jx = []
+
+            rhs = - self.F(initVal.flatten(), t0, y0)[i * self.m:(i + 1) * self.m] \
+                  + np.sum([self.h * self.A[i, j] *
+                    self.JacobianProduct(initVal.flatten()[i * self.m:(i + 1) * self.m],x[j]) for j in range(i)], axis=0)
+
+            MatProd = lambda v: np.dot(np.eye(self.m),v) - self.h * self.A[0, 0] * self.JacobianProduct(initVal.flatten()[i * self.m:(i + 1) * self.m],v)
+            M = spla.LinearOperator((self.m, self.m), matvec = MatProd)
+
+            d, exitCode = spla.gmres(M, rhs)
+
 
             x.append(d)
+
 
         return initVal + x, np.linalg.norm(x)
 
@@ -235,8 +257,8 @@ class Gauss(RungeKutta_implicit): #order 6
     b=[5/18,4/9,5/18]
     c=[1/2-np.sqrt(15)/10,1/2,1/2+np.sqrt(15)/10]
 
-N = 250
-t0, te = 0, 5.
+N = 1000
+t0, te = 0, 1.
 tol_newton = 1e-9
 tol_sol = 1e-5
 timeGrid = np.linspace(t0,te,N+2) #N interior points
@@ -255,39 +277,45 @@ def jacobian(t,y):
     Jacobian = np.array([[0, 1], [-g/L*np.cos(y[0]), 0]])
     return Jacobian
 
+tt = timing.time()
 system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
 
 system.solve()
 time,solution = system.time,system.solution
+ttt = timing.time()
 
-y1 = np.array([2*np.cos(t)+3*np.sin(t) for t in timeGrid])
-y2 = np.array([-2*np.sin(t) + 3*np.cos(t) for t in timeGrid])
-y_true = np.stack((y1,y2),axis=0)
-
-error = np.linalg.norm(y_true - solution)
-print('The mean error: {}'.format(error))
+print('SDIRK2 time :' + str(ttt-tt))
 
 
 plt.figure()
 plt.plot(solution[0,:],solution[1,:],'-',linewidth=2.)
-#plt.plot(time,solution[1,:],'.-', markersize=5,linewidth=2.)
 
 
 
-N = 200
-timeGrid = np.linspace(t0,te,N+2) #N interior points
 
-system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
+tt = timing.time()
+system = SDIRK_tableau5s(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
 
 system.solve()
 time,solution = system.time,system.solution
+ttt = timing.time()
 
-y1 = np.array([2*np.cos(t)+3*np.sin(t) for t in timeGrid])
-y2 = np.array([-2*np.sin(t) + 3*np.cos(t) for t in timeGrid])
-y_true = np.stack((y1,y2),axis=0)
+print('SDIRK5 time :' + str(ttt-tt))
 
-error = np.linalg.norm(y_true - solution)
-print('The mean error: {}'.format(error))
+
+plt.plot(solution[0,:],solution[1,:],'-',linewidth=2.)
+
+
+
+tt = timing.time()
+system = Gauss(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,lambda t,y:jacobian(t,y),tol_newton)
+
+system.solve()
+time,solution = system.time,system.solution
+ttt = timing.time()
+
+print('Gauss time :' + str(ttt-tt))
+
 
 plt.plot(solution[0,:],solution[1,:],'--',linewidth=2.)
 

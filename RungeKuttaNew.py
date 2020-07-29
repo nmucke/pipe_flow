@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 #import DG_routines as DG
 import scipy.optimize as opt
 import time
-
+import scipy.sparse.linalg as spla
 
 
 
@@ -47,9 +47,9 @@ class RungeKutta_implicit(Onestepmethod):
 
     def phi_solve(self, t0, y0, initVal):
 
-        initVal  = self.phi_newtonstep(t0, y0, initVal)
+        initVal  = opt.newton(lambda y:self.rhs(y,t0,y0),initVal)
 
-        return initVal
+        return  np.asarray(initVal)
 
     def rhs(self, initVal,t0,y0):
         RHS = np.empty(initVal.shape)
@@ -57,10 +57,6 @@ class RungeKutta_implicit(Onestepmethod):
             RHS[i, :] = - self.F(initVal.flatten(), t0, y0)[i * self.m:(i + 1) * self.m]
         return RHS
 
-    def phi_newtonstep(self, t0, y0, initVal):
-        sol=opt.newton(lambda y:self.rhs(y,t0,y0),initVal)
-
-        return np.asarray(sol)
 
     def F(self, stageDer, t0, y0):
 
@@ -90,14 +86,54 @@ class SDIRK(RungeKutta_implicit):
 
         return np.asarray(sol)
 
+class SDIRK_GMRES(RungeKutta_implicit):
 
-class SDIRK_tableau2s(SDIRK): # order 3
+    def phi_solve(self, t0, y0, initVal, M=10):
+
+        for i in range(M):
+            initVal, norm_d = self.phi_newtonstep(t0, y0, initVal)
+            if norm_d < self.tol:
+                #print('Newton converged in {} steps'.format(i))
+                break
+
+            elif i == M - 1:
+                raise ValueError('The Newton iteration did not converge.')
+
+        return initVal
+
+    def JacobianProduct(self,yk,ydelta):
+        epsilon = 1/(np.linalg.norm(ydelta)+np.finfo(float).eps) * (np.finfo(float).eps/2)**(1/3)
+        return 0.5*(self.f(self.t0,yk+epsilon*ydelta)-self.f(self.t0,yk-epsilon*ydelta))/epsilon
+
+    def phi_newtonstep(self, t0, y0, initVal):
+
+        x = []
+        for i in range(self.s):  # solving the s mxm systems
+
+
+            Jx = []
+
+            rhs = - self.F(initVal.flatten(), t0, y0)[i * self.m:(i + 1) * self.m] \
+                  + np.sum([self.h * self.A[i, j] *
+                    self.JacobianProduct(initVal.flatten()[i * self.m:(i + 1) * self.m],x[j]) for j in range(i)], axis=0)
+
+            MatProd = lambda v: np.dot(np.eye(self.m),v) - self.h * self.A[0, 0] * self.JacobianProduct(initVal.flatten()[i * self.m:(i + 1) * self.m],v)
+            M = spla.LinearOperator((self.m, self.m), matvec = MatProd)
+
+            d, exitCode = spla.gmres(M, rhs)
+
+            x.append(d)
+
+
+        return initVal + x, np.linalg.norm(x)
+
+class SDIRK_tableau2s(SDIRK_GMRES): # order 3
     p = (3 - np.sqrt(3))/6
     A = np.array([[p, 0], [1 - 2*p, p]])
     b = np.array([1/2, 1/2])
     c = np.array([p, 1 - p])
 
-class SDIRK_tableau5s(SDIRK): #order 4
+class SDIRK_tableau5s(SDIRK_GMRES): #order 4
     A = np.array([[1/4, 0, 0, 0, 0], [1/2, 1/4, 0, 0, 0], [17/50,
     -1/25, 1/4, 0, 0],[371/1360, -137/2720, 15/544, 1/4,
     0],[25/24, -49/48, 125/16, -85/12, 1/4]])
@@ -111,6 +147,8 @@ class Gauss(RungeKutta_implicit): #order 6
     b=[5/18,4/9,5/18]
     c=[1/2-np.sqrt(15)/10,1/2,1/2+np.sqrt(15)/10]
 
+
+'''
 N = 10000
 t0, te = 0, 5.
 tol_newton = 1e-9
@@ -125,12 +163,12 @@ def rhs(t,y):
     return RHS
 
 tt = time.time()
-system = Gauss(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,tol_newton)
+system = SDIRK_tableau2s(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,tol_newton)
 
 system.solve()
 t_vec,solution = system.time,system.solution
 ttt = time.time()
-print(ttt-tt)
+print('SDIRK2 time: ' + str(ttt-tt))
 
 
 plt.figure()
@@ -149,12 +187,12 @@ system = Gauss(lambda t,y:rhs(t,y),np.array([np.pi/2.,10]),t0,te, N,tol_newton)
 system.solve()
 t_vec,solution = system.time,system.solution
 ttt = time.time()
-print(ttt-tt)
+print('Gauss time: ' + str(ttt-tt))
 
 plt.plot(solution[0,:],solution[1,:],'--',linewidth=2.)
 
 plt.show()
-
+'''
 """
 class ImplicitRungeKutta():
     def __init__(self, f, y0, t0, te, h, tol):
