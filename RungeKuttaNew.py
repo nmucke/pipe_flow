@@ -110,20 +110,17 @@ class SDIRK_GMRES(RungeKutta_implicit):
         x = []
         for i in range(self.s):  # solving the s mxm systems
 
-
-            Jx = []
-
             rhs = - self.F(initVal.flatten(), t0, y0)[i * self.m:(i + 1) * self.m] \
                   + np.sum([self.h * self.A[i, j] *
                     self.JacobianProduct(initVal.flatten()[i * self.m:(i + 1) * self.m],x[j]) for j in range(i)], axis=0)
 
             MatProd = lambda v: np.dot(np.eye(self.m),v) - self.h * self.A[0, 0] * self.JacobianProduct(initVal.flatten()[i * self.m:(i + 1) * self.m],v)
+
             M = spla.LinearOperator((self.m, self.m), matvec = MatProd)
 
-            d, exitCode = spla.gmres(M, rhs)
+            d, exitCode = spla.minres(M, rhs,tol = 1e-5)
 
             x.append(d)
-
 
         return initVal + x, np.linalg.norm(x)
 
