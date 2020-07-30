@@ -53,19 +53,19 @@ DG_model_pipe.StartUp()
 xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
 
 xl = 50
-tl = np.array([[0.05,0.15]])
+tl = np.array([[0.05,0.1]])
 
 mu1 = 50.
 mu2 = 60
 sigma = .01
-#q1init =  3 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2))
-#q1init += rho0
+q1init =  3 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2))
+q1init += rho0
 
-q1init = rho0*np.ones((N+1,K))
+#q1init = rho0*np.ones((N+1,K))
 
 q2init = np.zeros((N+1,K))
 
-solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=.2,xl=xl,tl=tl,implicit=False)
+solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=.1,xl=xl,tl=tl,implicit=True,stepsize=1e-2)
 #%%
 rho = []
 u = []

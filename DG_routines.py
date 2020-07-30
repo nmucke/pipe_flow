@@ -393,9 +393,6 @@ class Pipe1D(DG_1D):
         q1 = q[0:int(len(q)/2)]
         q2 = q[-int(len(q)/2):]
 
-        q1 = q1.flatten('F')
-        q2 = q2.flatten('F')
-
         f_l = Pipe1D.f_leak(self, time, self.xElementL, self.tl)
 
         u = np.divide(q2,q1)
@@ -445,6 +442,7 @@ class Pipe1D(DG_1D):
         rhsq1 = rhsq1.flatten('F')
         rhsq2 = rhsq2.flatten('F')
 
+        #print(time)
         return np.concatenate((rhsq1,rhsq2),axis=0)
 
     def ExplicitIntegration(self,q1,q2,FinalTime):
@@ -514,20 +512,22 @@ class Pipe1D(DG_1D):
 
         return solq1, solq2, tVec
 
-    def ImplicitIntegration(self,q1,q2,FinalTime):
+    def ImplicitIntegration(self,q1,q2,FinalTime,stepsize):
 
-        time = 0
+        N_steps = int(FinalTime/stepsize)
 
         initCondition = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
-        system = RK.SDIRK_tableau2s(lambda t, y: rhs(t, y), np.array([np.pi / 2., 10]), t0, te, N, tol_newton)
+        system = RK.SDIRK_tableau2s(lambda t, y: self.PipeRHS1DImplicit(t, y), initCondition, t0=0, te=FinalTime, N=N_steps, tol =1e-5)
 
         system.solve()
         t_vec, solution = system.time, system.solution
 
+        pdb.set_trace()
+
         return solq1, solq2, tVec
 
-    def solve(self, q1,q2, FinalTime,xl,tl,implicit=False):
+    def solve(self, q1,q2, FinalTime,xl,tl,implicit=False,stepsize=1e-5):
 
 
         self.tl = tl
@@ -538,7 +538,7 @@ class Pipe1D(DG_1D):
 
         t0 = timing.time()
         if implicit:
-
+            solq1, solq2, tVec = self.ImplicitIntegration( q1, q2, FinalTime, stepsize)
         else:
             solq1, solq2, tVec = Pipe1D.ExplicitIntegration(self,q1,q2,FinalTime)
         t1 = timing.time()
