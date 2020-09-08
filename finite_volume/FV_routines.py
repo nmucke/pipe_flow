@@ -23,8 +23,18 @@ class FV_1D():
         self.xmid = 0.5*(self.x[0:self.num_volumes] + self.x[1:self.num_volumes+1])
 
 
-        self.shift_minus = np.diag(np.ones(self.num_volumes-1),k=-1)
-        self.shift_plus = np.diag(np.ones(self.num_volumes-1),k=1)
+        self.D_p = -np.diag(np.ones(self.num_volumes)) + np.diag(np.ones(self.num_volumes-1),k=1)
+        self.D_p[-1,0] = 1
+
+        self.I_p = 0.5*np.diag(np.ones(self.num_volumes)) + 0.5*np.diag(np.ones(self.num_volumes - 1), k=-1)
+        self.I_p[0, -1] = 0.5
+
+        self.D_u = np.diag(np.ones(self.num_volumes)) - np.diag(np.ones(self.num_volumes-1), k=-1)
+        self.D_u[0, -1] = -1
+
+        self.I_u = 0.5 * np.diag(np.ones(self.num_volumes)) + 0.5 * np.diag(np.ones(self.num_volumes-1), k=1)
+        self.I_u[-1, 0] = 0.5
+
 
         self.rk4a = np.array([0.0, -567301805773.0 / 1357537059087.0, -2404267990393.0 / 2016746695238.0,
                               -3550918686646.0 / 2091501179385.0, -1275806237668.0 / 842570457699.0])
@@ -226,32 +236,18 @@ class LSWE(FV_1D):
 
     def RHS(self,t,q1,q2):
 
-        q1_left_ghost_point = 2*q1[0] - q1[1]
-        q1_right_ghost_point = 2*q1[-1] + q1[-2]
-        q1 = np.concatenate((np.array([q1_left_ghost_point]),q1,np.array([q1_right_ghost_point])))
-        q2[0],q2[-1] = 0,0
 
-        rhsq1 = np.zeros(q1.shape)
-        rhsq2 = np.zeros(q2.shape)
+        q1_interpolated = np.dot(self.I_p,q1)
+        q1_diff = np.dot(self.D_p,q1)
 
-        q1_left, q2_left = q1[0:-1], q2[0:-1]
-        q1_right, q2_right = q1[1:], q2[1:]
+        q2_interpolated = np.dot(self.I_u,q2)
+        q2_diff = np.dot(self.D_u,q2)
 
-        F1_left = self.d0*q2_left
-        F1_right = self.d0*q2_right
-        F2_left = self.g*q1_left[2:]
-        F2_right = self.g*q1_right[:-2]
+        rhsq1 = -self.d0*q2_diff
+        rhsq2 = -self.g*q1_diff
 
-
-        q1_diff = q1_right-q1_left
-        q1_diff = 0.5*(q1_diff[0:-1] + q1_diff[1:])
-        pdb.set_trace()
-
-        rhsq1 = 0.5 * (F1_left + F1_right - q1_diff)
-        rhsq2[1:-1] = 0.5 * (F2_left + F2_right - (q2_right-q2_left))
-
-        rhsq1 = -rhsq1/self.dx
-        rhsq2 = -rhsq2/self.dx
+        rhsq1 = rhsq1/self.dx
+        rhsq2 = rhsq2/self.dx
 
         return rhsq1, rhsq2
 
@@ -290,9 +286,9 @@ class LSWE(FV_1D):
         time = [t]
 
         while t < FinalTime:
+            CFL = 0.5
+            dt = CFL * self.dx/np.abs(np.sqrt(self.d0)*np.sqrt(self.g))
             for INTRK in range(0, 5):
-                CFL = 0.5
-                dt = 0.00001#CFL * self.dx/
 
                 rhsq1,rhsq2 = self.RHS(t,q1,q2)
 
@@ -320,3 +316,56 @@ class Pipe1D(FV_1D):
         self.p0 = p0
         self.diameter = diameter
         self.A = (diameter/2)**2 * np.pi
+
+    def RHS(self, t, q1, q2):
+        q1_interpolated = np.dot(self.I_p, q1)
+        q1_diff = np.dot(self.D_p, q1)
+
+        q2_interpolated = np.dot(self.I_u, q2)
+        q2_diff = np.dot(self.D_u, q2)
+
+        
+
+        rhsq1 = -q2_diff
+        rhsq2 = -q1_diff
+
+        rhsq1 = rhsq1 / self.dx
+        rhsq2 = rhsq2 / self.dx
+
+        return rhsq1, rhsq2
+
+    def solve_RK(self,q1init,q2init,FinalTime=10):
+
+
+        resq1 = np.zeros(q1init.shape)
+        resq2 = np.zeros(q2init.shape)
+
+        solq1 = [q1init]
+        solq2 = [q2init]
+
+        q1 = q1init
+        q2 = q2init
+
+        t = 0
+        time = [t]
+
+        while t < FinalTime:
+            CFL = 0.5
+            dt = CFL * self.dx/np.abs(np.sqrt(self.d0)*np.sqrt(self.g))
+            for INTRK in range(0, 5):
+
+                rhsq1,rhsq2 = self.RHS(t,q1,q2)
+
+                resq1 = self.rk4a[INTRK] * resq1 + dt * rhsq1
+                resq2 = self.rk4a[INTRK] * resq2 + dt * rhsq2
+
+                q1 = q1 + self.rk4b[INTRK] * resq1
+                q2 = q2 + self.rk4b[INTRK] * resq2
+
+            solq1.append(q1)
+            solq2.append(q2)
+            t = t + dt
+            time.append(t)
+            print(t)
+
+        return solq1,solq2,time
