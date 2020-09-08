@@ -324,7 +324,7 @@ class Pipe1D(FV_1D):
         q2_interpolated = np.dot(self.I_u, q2)
         q2_diff = np.dot(self.D_u, q2)
 
-        
+
 
         rhsq1 = -q2_diff
         rhsq2 = -q1_diff
