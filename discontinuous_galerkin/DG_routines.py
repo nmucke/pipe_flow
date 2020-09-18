@@ -440,7 +440,6 @@ class Pipe1D(DG_1D):
         self.A = (diameter/2)**2 * np.pi
 
 
-
     def f_leak(self,time,xElementL,tl):
 
         f_l = np.zeros((self.x.shape))
@@ -544,7 +543,7 @@ class Pipe1D(DG_1D):
         dq1Flux = np.reshape(dq1Flux,((self.Nfp*self.Nfaces,self.K)),'F')
         dq2Flux = np.reshape(dq2Flux,((self.Nfp*self.Nfaces,self.K)),'F')
 
-        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux))# - 1/self.deltax*f_l
+        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux)) - 1/self.deltax*f_l
         rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux))
 
         return rhsq1,rhsq2
@@ -599,7 +598,7 @@ class Pipe1D(DG_1D):
         dq1Flux = np.reshape(dq1Flux,((self.Nfp*self.Nfaces,self.K)),'F')
         dq2Flux = np.reshape(dq2Flux,((self.Nfp*self.Nfaces,self.K)),'F')
 
-        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux)) - 10/self.deltax*f_l
+        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux)) - 1/self.deltax*f_l
         rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux))
 
         rhsq1 = rhsq1.flatten('F')
@@ -626,13 +625,13 @@ class Pipe1D(DG_1D):
         resq2 = np.zeros((self.Np,self.K))
 
         i = 0
+
         while time < FinalTime:
 
             u = np.divide(q2, q1)
             lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
             C = np.max(lam)
             dt = CFL * mindeltax / C
-            '''
             for INTRK in range(0, 5):
                 rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1, q2)
 
@@ -668,8 +667,9 @@ class Pipe1D(DG_1D):
             q1 = DG_1D.SlopeLimitN(self, q1)
             q2 = DG_1D.SlopeLimitN(self, q2)
 
-            solq1.append(q1)
-            solq2.append(q2)
+            '''
+            solq1.append(q1.flatten('F'))
+            solq2.append(q2.flatten('F'))
 
             time = time + dt
             tVec.append(time)
@@ -701,6 +701,7 @@ class Pipe1D(DG_1D):
         self.tl = tl
         self.xElementL = np.int(xl/self.xmax * self.K)
 
+
         q1 = DG_1D.SlopeLimitN(self,q1)
         q2 = DG_1D.SlopeLimitN(self,q2)
 
@@ -708,6 +709,7 @@ class Pipe1D(DG_1D):
         if implicit:
             solq1, solq2, tVec = self.ImplicitIntegration(q1, q2)
         else:
+
             solq1, solq2, tVec = Pipe1D.ExplicitIntegration(self,q1,q2,FinalTime)
         t1 = timing.time()
 
