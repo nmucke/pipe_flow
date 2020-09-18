@@ -322,7 +322,7 @@ class DG_1D:
 
 
 class BDF2(DG_1D):
-    def __init__(self, f, u0, t0, te, stepsize=1e-5,xmin=0, xmax=1, K=5, N=5):
+    def __init__(self, f, u0, t0, te, stepsize=1e-5,xmin=0, xmax=1, K=10, N=2):
 
         DG_1D.__init__(self, xmin=xmin, xmax=xmax, K=K, N=N)
 
@@ -335,126 +335,18 @@ class BDF2(DG_1D):
         self.m = len(u0)
         self.time = 0
         self.MaxNewtonIter = 50
+        self.newton_tol = 1e-6
 
         self.alpha = np.array([1, -4/3, 1/3])
         self.beta = 2/3
-
-    def InitialStep(self):
-
-        # Uinit = self.sol[-1] + self.deltat * self.f(self.time, self.sol[-1])
-
-        G = lambda Unew: Unew - self.sol[-1] - self.deltat * self.f(self.time + self.deltat, Unew)
-        '''
-        def G(Unew):
-            g = Unew - self.sol[-1] - self.deltat * self.f(self.time + self.deltat, Unew)
-
-            return g
-        '''
-        Unew = opt.newton_krylov(G, self.sol[-1],maxiter=self.MaxNewtonIter)
-
-
-        Unew[0:int(len(Unew) / 2)] = self.SlopeLimitN(
-            np.reshape(Unew[0:int(len(Unew) / 2)], (self.Np, self.K), 'F')).flatten('F')
-
-        Unew[-int(len(Unew) / 2):] = self.SlopeLimitN(
-            np.reshape(Unew[-int(len(Unew) / 2):], (self.Np, self.K), 'F')).flatten('F')
-
-        return Unew
-
-    def UpdateState(self):
-
-        # Uinit = self.sol[-1] + self.deltat * self.f(self.time, self.sol[-1])
-
-        #G = lambda Unew: (self.alpha[0] * Unew + self.alpha[1] * self.sol[-1] + self.alpha[2] * self.sol[
-        #    -2])  - self.beta*self.deltat*self.f(self.time + self.deltat, Unew)
-        G = lambda Unew: Unew  - self.sol[-1]  - self.deltat * self.f(self.time + self.deltat, Unew)
-        Unew = opt.newton(G, self.sol[-1])
-
-        Unew[0:int(len(Unew) / 2)] = self.SlopeLimitN(np.reshape(Unew[0:int(len(Unew) / 2)], (self.Np, self.K), 'F')).flatten('F')
-        Unew[-int(len(Unew) / 2):] = self.SlopeLimitN(np.reshape(Unew[-int(len(Unew) / 2):], (self.Np, self.K), 'F')).flatten('F')
-
-        return Unew
-
-    def solve(self):
-
-        self.sol = [self.u0]
-        tVec = [self.t0]
-        self.time = self.t0
-
-        self.Un = self.InitialStep()
-        self.sol.append(self.Un)
-        self.time += self.deltat
-        tVec.append(self.time)
-
-        for i in range(self.Ntime - 1):
-            self.Un = self.UpdateState()
-            self.time += self.deltat
-            tVec.append(self.time)
-            self.sol.append(self.Un)
-
-            if i % 100 == 0:
-                print(self.time)
-
-        return tVec, np.asarray(self.sol)
-
-
-class SDIRK(DG_1D):
-    def __init__(self, f, u0, t0, te, stepsize=1e-2, tol=1e-6, order=4,xmin=0, xmax=1, K=5, N=5):
-        DG_1D.__init__(self, xmin=xmin, xmax=xmax, K=K, N=N)
-
-        self.f = f
-        self.u0 = u0.astype(float)
-        self.t0 = t0
-        self.interval = [t0, te]
-        #self.timeGrid = np.linspace(t0, te, N)  # N interior points
-        self.deltat = stepsize#(te - t0) / (N + 1)
-
-        self.N = int((te-t0)/stepsize)
-        self.tol = tol
-        self.m = len(u0)
-        self.order = order
-        self.time = 0
-        self.Un = u0
-        self.MaxNewtonIter = 50
-
-        if self.order == 4:
-
-            s = 3
-            r = 1.7588
-            g = 0.5 * (1 - np.cos(np.pi / 18) / np.sqrt(3) - np.sin(np.pi / 18))
-            q = (0.5 - g) ** 2
-            self.A = np.array([[g, 0, 0, ],
-                   [0.5 - g, g, 0],
-                   [2 * g, 1 - 4 * g, g]])
-            self.b = np.array([1 / (24 * q), 1 - 1 / (12 * q), 1 / (24 * q)])
-
-            self.c = np.sum(self.A, axis=1)
-        elif self.order == 1:
-
-            self.A = np.array([[1]])
-            self.b = np.array([1])
-
-            self.c = np.array([1])
-
-
-        self.stages = self.b.shape[0]
-
-        self.F_RK = np.zeros((self.stages,self.m))
-
-    def JacobianMultiply(self, uj,x):
-        epsilon = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(uj), 1)
-        Jd = self.f(self.time, uj + epsilon * x) - self.f(self.time, uj)
-        Jd = Jd / epsilon
-        return Jd
 
     def ComputeJacobian(self,U):
 
         J = np.zeros((self.m,self.m))
 
-        z = np.zeros(self.m)
         F = self.f(self.time,U)
         for col in range(self.m):
-            pert = z
+            pert = np.zeros(self.m)
             pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(U[col]), 1)
             pert[col] = pert_jac
 
@@ -463,109 +355,83 @@ class SDIRK(DG_1D):
             Fpert = self.f(self.time,Upert)
 
             J[:,col] = (Fpert - F) / pert_jac
-        #x = np.ones(U.shape)
-        #lol = self.JacobianMultiply(U,x)
-        #lal = np.dot(J,x)
-        #pdb.set_trace()
+
         return J
 
-    def res(self, u,kk):
-        return -(u - self.Un) + self.deltat * np.dot(self.A[kk, :], self.F_RK)
+    def InitialStep(self):
 
-    def linesearch_res(self,uj,alpha,d,kk,tj):
+        J = self.ComputeJacobian(self.sol[-1])
 
-        self.F_RK[kk, :] = self.f(tj, uj+alpha*d)
-        return -(uj+alpha*d - self.Un) + self.deltat * np.dot(self.A[kk, :], self.F_RK)
+        LHS = 1/self.deltat*np.eye(self.m) - J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1/self.deltat*(U_old - self.sol[-1]) - self.f(self.time,U_old))
+
+            delta_U = np.linalg.solve(LHS,RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
 
     def UpdateState(self):
-        self.F_RK = np.zeros((self.stages,self.m))
 
-        for kk in range(self.stages):
-            uj = self.Un
-            tj = self.time + self.c[kk]*self.deltat
+        J = self.ComputeJacobian(self.sol[-1])
 
-            self.F_RK[kk,:] = self.f(tj,uj)
-            res = -(uj - self.Un) + self.deltat * np.dot(self.A[kk, :], self.F_RK)#self.res(uj,kk)
-            k = 0
-            #lhs = lambda d: d-self.deltat*self.A[kk,kk]*self.JacobianMultiply(uj,d)
-            #lhs = spla.LinearOperator((self.m, self.m), lhs)
-            J = self.ComputeJacobian(uj)
-            Q = np.eye(self.m) - self.deltat * self.A[kk, kk] * J
-            lu,piv = scilin.lu_factor(Q)
-            while np.max(np.abs(res))>1e-3:
+        LHS = 1 / self.deltat * np.eye(self.m) - self.beta*J
 
-                #d, _ = spla.gmres(lhs, res, tol=1e-2)
-                d = scilin.lu_solve((lu,piv),res)
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1 / self.deltat * (self.alpha[0]*U_old + self.alpha[1]*self.sol[-1]+ self.alpha[2]*self.sol[-2]) - self.beta*self.f(self.time, U_old))
 
-                line_search_res = lambda alpha: np.linalg.norm(self.linesearch_res(uj,alpha,d,kk,tj))
-                alpha = opt.minimize(line_search_res,1,tol=1e-3)
+            delta_U = np.linalg.solve(LHS, RHS)
 
-                uj = uj + alpha.x[0]*d
+            U_old = U_old + delta_U
 
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
 
-                k = k+1
-
-
-                self.F_RK[kk,:] = self.f(tj,uj)
-
-                res = -(uj - self.Un) + self.deltat * np.dot(self.A[kk, :], self.F_RK)#self.res(uj,kk)
-
-                if k > self.MaxNewtonIter:
-                    print('Newton not converged in ' + str(self.MaxNewtonIter) + ' iterations')
-                    break
-
-
-
-            uj[0:int(len(uj) / 2)] = self.SlopeLimitN(
-                np.reshape(uj[0:int(len(uj) / 2)], (self.Np, self.K), 'F')).flatten('F')
-            uj[-int(len(uj) / 2):] = self.SlopeLimitN(
-                np.reshape(uj[-int(len(uj) / 2):], (self.Np, self.K), 'F')).flatten('F')
-            self.F_RK[kk,:] = self.f(tj,uj)
-            '''
-
-            res = lambda u: self.linesearch_res(u,0,0,kk,tj)
-            uj = opt.newton(res,uj,tol=1e-3)
-
-            uj[0:int(len(uj) / 2)] = self.SlopeLimitN(
-                np.reshape(uj[0:int(len(uj) / 2)], (self.Np, self.K), 'F')).flatten('F')
-            uj[-int(len(uj) / 2):] = self.SlopeLimitN(
-                np.reshape(uj[-int(len(uj) / 2):], (self.Np, self.K), 'F')).flatten('F')
-
-            self.F_RK[kk, :] = self.f(tj, uj)
-            '''
-
-        Unew = self.Un + self.deltat*np.dot(self.b,self.F_RK)
-
-
-        Unew[0:int(len(Unew) / 2)] = self.SlopeLimitN(np.reshape(Unew[0:int(len(Unew) / 2)], (self.Np, self.K), 'F')).flatten('F')
-        Unew[-int(len(Unew) / 2):] = self.SlopeLimitN(np.reshape(Unew[-int(len(Unew) / 2):], (self.Np, self.K), 'F')).flatten('F')
-
-        return Unew
+        return U_old
 
     def solve(self):
 
-        sol = [self.Un]
+        self.sol = [self.u0]
         tVec = [self.t0]
+        self.time = self.t0
 
-        self.J = self.ComputeJacobian(self.u0)
-        #self.invJ = scilin.inv(self.J)
+        self.Un = self.InitialStep()
+        self.Un[0:int((self.m/2))] = self.SlopeLimitN(np.reshape(self.Un[0:int((self.m/2))],(self.N+1,self.K),'F')).flatten('F')
+        self.Un[-int((self.m/2)):] = self.SlopeLimitN(np.reshape(self.Un[-int((self.m/2)):],(self.N+1,self.K),'F')).flatten('F')
+        self.sol.append(self.Un)
+        self.time += self.deltat
+        tVec.append(self.time)
 
-        for i in range(self.N):
+        for i in range(self.Ntime - 1):
             self.Un = self.UpdateState()
-            self.time = self.time + self.deltat
+            self.Un[0:int((self.m / 2))] = self.SlopeLimitN(np.reshape(self.Un[0:int((self.m / 2))], (self.N + 1, self.K), 'F')).flatten('F')
+            self.Un[-int((self.m / 2)):] = self.SlopeLimitN(np.reshape(self.Un[-int((self.m / 2)):], (self.N + 1, self.K), 'F')).flatten('F')
+            self.time += self.deltat
             tVec.append(self.time)
-            sol.append(self.Un)
-            if i % 100 == 0:
-                print(self.time)
+            self.sol.append(self.Un)
 
-        return tVec, np.asarray(sol)
+            if i % 10 == 0:
+                print(str(int(i/(self.Ntime - 1)*100)) + '% Done' )
 
-
-
-
+        return tVec, np.asarray(self.sol)
 
 class Pipe1D(DG_1D):
     def __init__(self, xmin=0,xmax=1,K=10,N=5,c=1400,rho0=1000,p0=1e5, diameter=0.5):
+        self.xmin = xmin
+        self.xmax = xmax
+        self.K=K
+        self.N = N
         DG_1D.__init__(self, xmin=xmin,xmax=xmax,K=K,N=N)
         self.c = c
         self.rho0 = rho0
@@ -594,10 +460,10 @@ class Pipe1D(DG_1D):
 
         u = np.divide(q2,q1)
 
-        pressure = self.c*self.c*(q1-self.rho0) + self.p0
-
+        pressure = self.c*self.c*(q1/self.A-self.rho0) + self.p0
+        '''
         q1Flux = q2
-        q2Flux = q1*np.power(u,2) + pressure
+        q2Flux = np.divide(np.power(q2,2),q1) + pressure#q1*np.power(u,2) + pressure
 
         lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
 
@@ -609,7 +475,7 @@ class Pipe1D(DG_1D):
         f2star = 1/2*(q2Flux[self.vmapM] + q2Flux[self.vmapP]) + C/2. * nx*(q2[self.vmapM] - q2[self.vmapP])
         dq1Flux = nx*(q1Flux[self.vmapM]-f1star)
         dq2Flux = nx*(q2Flux[self.vmapM]-f2star)
-
+        
         uIn = 0.
         uOut = 0.
         q2in = uIn*q1[self.vmapI]
@@ -627,16 +493,61 @@ class Pipe1D(DG_1D):
         dq1Flux[self.mapO] = np.dot(nx[self.mapO],q1Flux[self.vmapO]-q1FluxOut)/2
         dq2Flux[self.mapO] = np.dot(nx[self.mapO],q2Flux[self.vmapO]-q2FluxOut)/2 - np.dot(C,q2[self.vmapO]-q2out)
 
+        '''
+        cvel = self.c
+        lm = np.abs(np.divide(q2, q1)) + cvel
+
+        q1Flux = q2
+        q2Flux = np.divide(np.power(q2, 2), q1) + pressure*self.A
+
+        dq1 = q1[self.vmapM] - q1[self.vmapP]
+        dq2 = q2[self.vmapM] - q2[self.vmapP]
+
+        dq1Flux = q1Flux[self.vmapM] - q1Flux[self.vmapP]
+        dq2Flux = q2Flux[self.vmapM] - q2Flux[self.vmapP]
+
+        LFc = np.maximum((lm[self.vmapM]), (lm[self.vmapP]))
+
+        dq1Flux = self.nx.flatten('F') * dq1Flux / 2. - LFc / 2. * dq1
+        dq2Flux = self.nx.flatten('F') * dq2Flux / 2. - LFc / 2. * dq2
+
+        q1in = q1[self.vmapO]#q1[self.vmapI]
+        q1out = q1[self.vmapI]#q1[self.vmapO]#self.A*((1e5-self.p0)/(self.c*self.c)+self.rho0)#q1[self.vmapO]
+        q2in = q2[self.vmapO]#0.0
+        q2out = q2[self.vmapI]#0.0#q2[self.vmapO]
+        pin = self.c*self.c*(q1in/self.A-self.rho0) + self.p0
+        pout = self.c*self.c*(q1out/self.A-self.rho0) + self.p0
+
+        nx = self.nx.flatten('F')
+
+        q1FluxIn = q2in
+        q2FluxIn = np.divide(np.power(q2in, 2), q1in) + pin*self.A
+
+        lmIn = lm[self.vmapI] / 2
+        nxIn = nx[self.mapI]
+
+        dq1Flux[self.mapI] = np.dot(nxIn, q1Flux[self.vmapI] - q1FluxIn) / 2 - np.dot(lmIn, q1[self.vmapI] - q1in)
+        dq2Flux[self.mapI] = np.dot(nxIn, q2Flux[self.vmapI] - q2FluxIn) / 2 - np.dot(lmIn, q2[self.vmapI] - q2in)
+
+        q1FluxOut = q2out
+        q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout*self.A
+
+        lmOut = lm[self.vmapO] / 2
+        nxOut = nx[self.mapO]
+
+        dq1Flux[self.mapO] = np.dot(nxOut, q1Flux[self.vmapO] - q1FluxOut) / 2 - np.dot(lmOut, q1[self.vmapO] - q1out)
+        dq2Flux[self.mapO] = np.dot(nxOut, q2Flux[self.vmapO] - q2FluxOut) / 2 - np.dot(lmOut, q2[self.vmapO] - q2out)
+
         q1Flux = np.reshape(q1Flux, (self.Np, self.K), 'F')
         q2Flux = np.reshape(q2Flux, (self.Np, self.K), 'F')
 
         dq1Flux = np.reshape(dq1Flux,((self.Nfp*self.Nfaces,self.K)),'F')
         dq2Flux = np.reshape(dq2Flux,((self.Nfp*self.Nfaces,self.K)),'F')
 
-        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux))# - 0.5/self.deltax*1/self.A*f_l
+        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux))# - 1/self.deltax*f_l
         rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux))
 
-        return rhsq1,rhsq2,
+        return rhsq1,rhsq2
 
     def PipeRHS1DImplicit(self,time,q):
 
@@ -645,9 +556,11 @@ class Pipe1D(DG_1D):
 
         f_l = Pipe1D.f_leak(self, time, self.xElementL, self.tl)
 
+
         u = np.divide(q2,q1)
 
-        pressure = self.c*self.c*(q1-self.rho0) + self.p0
+        pressure = self.c*self.c*(q1/self.A-self.rho0) + self.p0
+        pressure = pressure*self.A
 
         q1Flux = q2
         q2Flux = q1*np.power(u,2) + pressure
@@ -686,7 +599,7 @@ class Pipe1D(DG_1D):
         dq1Flux = np.reshape(dq1Flux,((self.Nfp*self.Nfaces,self.K)),'F')
         dq2Flux = np.reshape(dq2Flux,((self.Nfp*self.Nfaces,self.K)),'F')
 
-        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux)) #- 0.5/self.deltax*1/self.A*f_l
+        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux)) - 10/self.deltax*f_l
         rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux))
 
         rhsq1 = rhsq1.flatten('F')
@@ -712,14 +625,14 @@ class Pipe1D(DG_1D):
         resq1 = np.zeros((self.Np,self.K))
         resq2 = np.zeros((self.Np,self.K))
 
-
+        i = 0
         while time < FinalTime:
 
             u = np.divide(q2, q1)
             lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
             C = np.max(lam)
             dt = CFL * mindeltax / C
-
+            '''
             for INTRK in range(0, 5):
                 rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1, q2)
 
@@ -733,7 +646,7 @@ class Pipe1D(DG_1D):
                 q2 = DG_1D.SlopeLimitN(self, q2)
 
             '''
-            rhsq1,rhsq2 = DG_1D.PipeRHS1D(self,time,q1,q2,c,rho0,p0,g)
+            rhsq1,rhsq2 = Pipe1D.PipeRHS1D(self,time,q1,q2)
             q1_1 = q1 + dt*rhsq1
             q2_1 = q2 + dt*rhsq2
 
@@ -741,38 +654,39 @@ class Pipe1D(DG_1D):
             q2_1 = DG_1D.SlopeLimitN(self, q2_1)
 
 
-            rhsq1, rhsq2 = DG_1D.PipeRHS1D(self, time, q1_1, q2_1,c,rho0,p0,g)
+            rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1_1, q2_1)
             q1_2 = (3*q1 + q1_1 + dt * rhsq1)/4
             q2_2 = (3*q2 + q2_1 + dt * rhsq2)/4
 
             q1_2 = DG_1D.SlopeLimitN(self, q1_2)
             q2_2 = DG_1D.SlopeLimitN(self, q2_2)
 
-            rhsq1, rhsq2 = DG_1D.PipeRHS1D(self, time, q1_2, q2_2,c,rho0,p0,g)
+            rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1_2, q2_2)
             q1 = (q1 + 2*q1_2 + 2*dt * rhsq1) / 3
             q2 = (q2 + 2*q2_2 + 2*dt * rhsq2) / 3
 
             q1 = DG_1D.SlopeLimitN(self, q1)
             q2 = DG_1D.SlopeLimitN(self, q2)
-            '''
+
             solq1.append(q1)
             solq2.append(q2)
 
             time = time + dt
             tVec.append(time)
 
+            i += 1
+            if i % 100 == 0:
+                print(str(int(time/self.FinalTime*100)) + '% Done' )
+
         return solq1, solq2, tVec
 
     def ImplicitIntegration(self, q1, q2):
 
-        q1 = self.SlopeLimitN(q1)
-        q2 = self.SlopeLimitN(q2)
 
         initCondition = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
         #system = SDIRK(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime,order=1, stepsize=self.stepsize, xmin=self.xmin,xmax=self.xmax, K=self.K, N=self.N)
-        system = BDF2(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime, stepsize=self.stepsize,
-                       xmin=self.xmin,xmax=self.xmax, K=self.K, N=self.N)
+        system = BDF2(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime, stepsize=self.stepsize,xmin=self.xmin, xmax=self.xmax, K=self.K, N=self.N)
         t_vec, solution = system.solve()
 
         #solution = integrate.solve_ivp(self.PipeRHS1DImplicit, [0, self.FinalTime], initCondition,method='RK45')
@@ -792,7 +706,7 @@ class Pipe1D(DG_1D):
 
         t0 = timing.time()
         if implicit:
-            solq1, solq2, tVec = self.ImplicitIntegration( q1, q2)
+            solq1, solq2, tVec = self.ImplicitIntegration(q1, q2)
         else:
             solq1, solq2, tVec = Pipe1D.ExplicitIntegration(self,q1,q2,FinalTime)
         t1 = timing.time()

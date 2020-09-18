@@ -23,17 +23,23 @@ class FV_1D():
         self.xmid = 0.5*(self.x[0:self.num_volumes] + self.x[1:self.num_volumes+1])
 
 
-        self.D_p = -np.diag(np.ones(self.num_volumes)) + np.diag(np.ones(self.num_volumes-1),k=1)
+        #self.D_p = -np.eye(num_volumes,num_volumes+1) + np.eye(num_volumes,num_volumes+1,1)
+        #self.I_p = 0.5*(np.eye(num_volumes + 1, num_volumes) + np.eye(num_volumes + 1, num_volumes, -1))
+
+        #self.D_u = np.eye(num_volumes+1,num_volumes) - np.eye(num_volumes+1,num_volumes,-1)
+        #self.I_u = 0.5*(np.eye(num_volumes, num_volumes + 1) + np.eye(num_volumes, num_volumes + 1, 1))
+
+        self.D_p = -np.eye(num_volumes, num_volumes) + np.eye(num_volumes, num_volumes, 1)
         self.D_p[-1,0] = 1
 
-        self.I_p = 0.5*np.diag(np.ones(self.num_volumes)) + 0.5*np.diag(np.ones(self.num_volumes - 1), k=-1)
-        self.I_p[0, -1] = 0.5
+        self.I_p = 0.5 * (np.eye(num_volumes, num_volumes) + np.eye(num_volumes, num_volumes, -1))
+        self.I_p[0,-1] = 0.5
 
-        self.D_u = np.diag(np.ones(self.num_volumes)) - np.diag(np.ones(self.num_volumes-1), k=-1)
-        self.D_u[0, -1] = -1
+        self.D_u = np.eye(num_volumes, num_volumes) - np.eye(num_volumes, num_volumes, -1)
+        self.D_u[0,-1] = -1
 
-        self.I_u = 0.5 * np.diag(np.ones(self.num_volumes)) + 0.5 * np.diag(np.ones(self.num_volumes-1), k=1)
-        self.I_u[-1, 0] = 0.5
+        self.I_u = 0.5 * (np.eye(num_volumes, num_volumes) + np.eye(num_volumes, num_volumes, 1))
+        self.I_u[-1,0] = 0.5
 
 
         self.rk4a = np.array([0.0, -567301805773.0 / 1357537059087.0, -2404267990393.0 / 2016746695238.0,
@@ -80,7 +86,7 @@ class Advection1D(FV_1D):
     def RHS(self,t,u):
 
 
-        U = np.concatenate((np.array([0]), u, np.array([0])))
+        U = np.concatenate((np.array([u[-1]]), u, np.array([u[0]])))
 
         a_left = np.maximum(np.abs(2*U[0:-2]),np.abs(2*U[1:-1]))
         a_right = np.maximum(np.abs(2*U[1:-1]),np.abs(2*U[2:]))
@@ -112,7 +118,7 @@ class Advection1D(FV_1D):
         return sol,time
 
     def solve_RK(self,u0,FinalTime=10):
-
+        
         t = 0
         time = [t]
         CFL = 0.5
@@ -133,6 +139,17 @@ class Advection1D(FV_1D):
             sol.append(u)
             t += dt
             time.append(t)
+        
+        
+
+        return sol,time
+    
+    def solve_implicit(self,u0,FinalTime=10,stepsize=1e-2):
+
+        initCondition = u0
+
+        system = BDF2(self.RHS, initCondition, t0=0, te=FinalTime, stepsize=stepsize)
+        time, sol = system.solve()
 
         return sol,time
 
@@ -227,27 +244,12 @@ class LSWE(FV_1D):
         self.g = g
         self.boundary_conditions = boundary_conditions
 
-    def flux(self,q1,q2):
-
-        F1 = self.d0*q2
-        F2 = self.g*q1
-
-        return F1,F2
-
     def RHS(self,t,q1,q2):
 
+        rhsq1 = -1/self.dx*self.d0*np.dot(self.D_p,q2)
+        rhsq2 = -1/self.dx*self.g*np.dot(self.D_u,q1)
 
-        q1_interpolated = np.dot(self.I_p,q1)
-        q1_diff = np.dot(self.D_p,q1)
-
-        q2_interpolated = np.dot(self.I_u,q2)
-        q2_diff = np.dot(self.D_u,q2)
-
-        rhsq1 = -self.d0*q2_diff
-        rhsq2 = -self.g*q1_diff
-
-        rhsq1 = rhsq1/self.dx
-        rhsq2 = rhsq2/self.dx
+        rhsq2[0],rhsq2[-1] = 0,0
 
         return rhsq1, rhsq2
 
@@ -286,7 +288,7 @@ class LSWE(FV_1D):
         time = [t]
 
         while t < FinalTime:
-            CFL = 0.5
+            CFL = 0.9
             dt = CFL * self.dx/np.abs(np.sqrt(self.d0)*np.sqrt(self.g))
             for INTRK in range(0, 5):
 
@@ -318,24 +320,43 @@ class Pipe1D(FV_1D):
         self.A = (diameter/2)**2 * np.pi
 
     def RHS(self, t, q1, q2):
-        q1_interpolated = np.dot(self.I_p, q1)
-        q1_diff = np.dot(self.D_p, q1)
 
-        q2_interpolated = np.dot(self.I_u, q2)
-        q2_diff = np.dot(self.D_u, q2)
+        pressure = self.c*self.c*(q1/self.A-self.rho0) + self.p0
 
+        rhsq1 = -1/self.dx*np.dot(self.D_p,q2)
+        rhsq2 = -1/self.dx*(np.dot(self.D_u,np.dot(self.I_u,q2*q2)/q1) + np.dot(self.D_u,pressure)*self.A)
 
-
-        rhsq1 = -q2_diff
-        rhsq2 = -q1_diff
-
-        rhsq1 = rhsq1 / self.dx
-        rhsq2 = rhsq2 / self.dx
+        #rhsq2[0],rhsq2[-1] = 0,0
 
         return rhsq1, rhsq2
 
-    def solve_RK(self,q1init,q2init,FinalTime=10):
+    def RHSimplicit(self, t, q):
+        q1 = q[0:self.num_volumes]
+        q2 = q[-(self.num_volumes):]
 
+        #rho00 = q1[0]
+        #rhoNplus1 = q1[-1]
+        #u0 = -q2[0]/rho00
+        #uNplus1 = -q2[-1]/rhoNplus1
+        #q2[0] = -q2[1]
+        #q2[-1] = -q2[-2]
+
+
+        pressure = self.c*self.c*(q1/self.A-self.rho0) + self.p0
+        #pressure0 = self.c*self.c*(rho00/self.A-self.rho0) + self.p0
+        #pressureNplus1 = self.c*self.c*(rhoNplus1/self.A-self.rho0) + self.p0
+
+        rhsq1 = -1/self.dx*np.dot(self.D_p,q2)
+        rhsq2 = -1/self.dx*(np.dot(self.D_u,np.dot(self.I_u,q2*q2)/q1) + np.dot(self.D_u,pressure)*self.A)
+
+        #rhsq2[0] = -1/self.dx*(0.5*(q2[1]+q2[0])**2/q1[0]+pressure[0]   - (rho00*u0 + pressure0))
+        #rhsq2[-1] = -1/self.dx*(rhoNplus1*uNplus1 + pressureNplus1 - (0.5*(q2[-1]+q2[-2])/q1[-1] + pressure[-1]) )
+
+        rhs = np.concatenate((rhsq1,rhsq2),axis=0)
+
+        return rhs
+
+    def solve_explicit(self,q1init,q2init,FinalTime=10):
 
         resq1 = np.zeros(q1init.shape)
         resq2 = np.zeros(q2init.shape)
@@ -348,10 +369,14 @@ class Pipe1D(FV_1D):
 
         t = 0
         time = [t]
-
+        CFL = 0.9
+        idx = 0
         while t < FinalTime:
-            CFL = 0.5
-            dt = CFL * self.dx/np.abs(np.sqrt(self.d0)*np.sqrt(self.g))
+            u = np.dot(self.I_u,q2)/q1
+            lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
+            C = np.max(lam)
+            dt = CFL * self.dx / C
+
             for INTRK in range(0, 5):
 
                 rhsq1,rhsq2 = self.RHS(t,q1,q2)
@@ -366,6 +391,129 @@ class Pipe1D(FV_1D):
             solq2.append(q2)
             t = t + dt
             time.append(t)
-            print(t)
+            if idx%100 == 0:
+                print(t)
+
+            idx += 1
 
         return solq1,solq2,time
+
+    def solve_implicit(self,q1init,q2init,FinalTime=10):
+
+        initCondition = np.concatenate((q1init, q2init), axis=0)
+
+        system = BDF2(self.RHSimplicit, initCondition, t0=0, te=FinalTime, stepsize=self.stepsize)
+        t_vec, solution = system.solve()
+
+        return solution[:, 0:int(solution.shape[1] / 2)], solution[:, -int(solution.shape[1] / 2):], t_vec
+
+    def solve(self,q1init,q2init,FinalTime=10,implicit=False,stepsize=1e2):
+
+
+        if implicit:
+            self.stepsize = stepsize
+            solq1, solq2, time = self.solve_implicit(q1init, q2init, FinalTime=FinalTime)
+        else:
+            solq1,solq2,time = self.solve_explicit(q1init, q2init, FinalTime=FinalTime)
+
+        return solq1,solq2,time
+
+
+class BDF2():
+    def __init__(self, f, u0, t0, te, stepsize=1e-5):
+
+        self.f = f
+        self.u0 = u0.astype(float)
+        self.t0 = t0
+        self.te = te
+        self.deltat = stepsize
+        self.Ntime = int((te-t0)/stepsize)
+        self.m = len(u0)
+        self.time = 0
+        self.MaxNewtonIter = 50
+        self.newton_tol = 1e-6
+
+        self.alpha = np.array([1, -4/3, 1/3])
+        self.beta = 2/3
+
+    def ComputeJacobian(self,U):
+
+        J = np.zeros((self.m,self.m))
+
+        F = self.f(self.time,U)
+        for col in range(self.m):
+            pert = np.zeros(self.m)
+            pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(U[col]), 1)
+            pert[col] = pert_jac
+
+            Upert = U + pert
+
+            Fpert = self.f(self.time,Upert)
+
+            J[:,col] = (Fpert - F) / pert_jac
+
+        return J
+
+    def InitialStep(self):
+
+        J = self.ComputeJacobian(self.sol[-1])
+
+        LHS = 1/self.deltat*np.eye(self.m) - J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1/self.deltat*(U_old - self.sol[-1]) - self.f(self.time,U_old))
+
+            delta_U = np.linalg.solve(LHS,RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
+
+    def UpdateState(self):
+
+        J = self.ComputeJacobian(self.sol[-1])
+
+        LHS = 1 / self.deltat * np.eye(self.m) - self.beta*J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1 / self.deltat * (self.alpha[0]*U_old + self.alpha[1]*self.sol[-1]+ self.alpha[2]*self.sol[-2]) - self.beta*self.f(self.time, U_old))
+
+            delta_U = np.linalg.solve(LHS, RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
+
+    def solve(self):
+
+        self.sol = [self.u0]
+        tVec = [self.t0]
+        self.time = self.t0
+
+        self.Un = self.InitialStep()
+        self.sol.append(self.Un)
+        self.time += self.deltat
+        tVec.append(self.time)
+
+        for i in range(self.Ntime - 1):
+            self.Un = self.UpdateState()
+            self.time += self.deltat
+            tVec.append(self.time)
+            self.sol.append(self.Un)
+
+            if i % 100 == 0:
+                print(self.time)
+
+        return tVec, np.asarray(self.sol)
