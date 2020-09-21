@@ -40,41 +40,51 @@ plt.figure()
 solsu = []
 solsrhoa = []
 solsp = []
-for N in [2,5]:
+for N in [2]:
     #N = 2
-    K = 1000
+    K = 250
 
     xmin = 0.
-    xmax = 100.
+    xmax = 5000.
 
-    c = 1400
-    rho0 = 1000
-    p0 = 1e5
+    c = 1227#1400
+    rho0 = 870#1000
+    p0 = 5e5
+    pamb = 1e5
 
-    diameter = 0.03568248232
+    diameter = 0.508
 
     DG_model_pipe = DG.Pipe1D(xmin=xmin,xmax=xmax,K=K,N=N,c=c,rho0=rho0,p0=p0, diameter=diameter)
     DG_model_pipe.StartUp()
 
     xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
-    xl = 50
-    tl = np.array([[.4,.3]])
+    xl = 1000
+    tl = np.array([[20.,1000.]])
+    Cv = 1.04e-4
+    mu = 1.04e-1
+    initInflow = 2.
+    initOutPres = 5e5
 
-    mu1 = 60.
-    sigma = 3.
-    q1init =  100 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2)) + rho0
-    q1init *= DG_model_pipe.A
-    #q1init = rho0*np.ones((N+1,K))*DG_model_pipe.A
+    FinalTime = 20.
 
-    q2init = np.zeros((N+1,K))
+    mu1 = xmax/2
+    sigma = .5
+    #q1init =  100 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2)) + rho0
+    #q1init *= DG_model_pipe.A
+    pinit = pamb*np.ones(DG_model_pipe.x.shape)
+    q1init = ((pinit - DG_model_pipe.p0) / (DG_model_pipe.c ** 2) + DG_model_pipe.rho0) * DG_model_pipe.A#rho0*np.ones((N+1,K))*DG_model_pipe.A
+    q2init = initInflow*np.ones((N+1,K))
 
-    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=.3,xl=xl,tl=tl,implicit=False,stepsize=1e0)
+    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=True,stepsize=1e-1,
+                                            xl=xl,tl=tl,leak_type='discharge',Cv=Cv,pamb=pamb,mu=mu,initInflow=initInflow,initOutPres=initOutPres)
     #%%
     rhoA = []
     u = []
     p = []
+    rho = []
     for i in range(len(solq1)):
         rhoA.append(solq1[i].flatten('F'))
+        rho.append((solq1[i]/DG_model_pipe.A).flatten('F'))
         u.append(np.divide(solq2[i],solq1[i]).flatten('F'))
         p.append(np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
 
@@ -88,6 +98,13 @@ for N in [2,5]:
         initial_total_mass += int.simps(np.reshape(solq1[0],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         end_total_mass += int.simps(np.reshape(solq1[-1],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
 
+    total_mass = []
+    for t in range(len(time)):
+        mass = 0
+        for i in range(K):
+            mass += int.simps(np.reshape(solq1[t],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
+        total_mass.append(mass)
+
 
     print('Initial total mass: ' + str(initial_total_mass))
     print('End total mass: ' + str(end_total_mass))
@@ -98,8 +115,14 @@ for N in [2,5]:
 plt.grid(True)
 plt.legend()
 plt.show()
+
+plt.figure()
+plt.plot(time,total_mass)
+plt.grid(True)
+plt.legend(['Total Mass'])
+plt.show()
     #%%
-'''
+
 xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
 plt.figure()
 plt.plot(xVec,u[-1])
@@ -118,8 +141,8 @@ plt.plot(xVec,p[-1])
 plt.grid(True)
 plt.legend(['p'])
 plt.show()
-'''
+
 
 #%%
-#animateSolution(xVec,time[0:-1:20],u[0:-1:20])
+animateSolution(xVec,time[0:-1],u[0:-1])
 
