@@ -203,7 +203,7 @@ pipe_model = FV.Pipe1D(xmin=xmin,xmax=xmax,num_volumes=num_volumes,c=c,rho0=rho0
 FinalTime = 0.01
 
 mu = xmax/3
-sigma = 0.01
+sigma = 0.5
 q1init = 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((pipe_model.xmid - mu) / sigma, 2)) + rho0
 q1init = q1init*pipe_model.A
 
