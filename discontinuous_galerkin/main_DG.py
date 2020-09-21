@@ -37,9 +37,12 @@ def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
     # save the animation as mp4 video file
     anim.save(gif_name + '.mp4',writer=writer)
 plt.figure()
-for K in [100,200,300,400]:
-    N = 3
-    #K = 500
+solsu = []
+solsrhoa = []
+solsp = []
+for N in [2,5]:
+    #N = 2
+    K = 1000
 
     xmin = 0.
     xmax = 100.
@@ -55,42 +58,44 @@ for K in [100,200,300,400]:
 
     xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
     xl = 50
-    tl = np.array([[.4,.5]])
+    tl = np.array([[.4,.3]])
 
-    mu1 = 80.
-    sigma = .01
-    q1init =  1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2)) + rho0
+    mu1 = 60.
+    sigma = 3.
+    q1init =  100 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2)) + rho0
     q1init *= DG_model_pipe.A
     #q1init = rho0*np.ones((N+1,K))*DG_model_pipe.A
 
     q2init = np.zeros((N+1,K))
 
-    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=.2,xl=xl,tl=tl,implicit=False,stepsize=1e-3)
+    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=.3,xl=xl,tl=tl,implicit=False,stepsize=1e0)
     #%%
     rhoA = []
     u = []
     p = []
     for i in range(len(solq1)):
-        rhoA.append(np.reshape(solq1[i], (N + 1) * K, 'F'))
-        u.append(np.reshape(np.divide(solq2[i],solq1[i]), (N + 1) * K, 'F'))
-        p.append(np.reshape(c*c*(solq1[i]-rho0)+p0, (N + 1) * K, 'F'))
+        rhoA.append(solq1[i].flatten('F'))
+        u.append(np.divide(solq2[i],solq1[i]).flatten('F'))
+        p.append(np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
 
-    '''
+    solsu.append(u)
+    solsrhoa.append(rhoA)
+    solsp.append(p)
+
     initial_total_mass = 0
     end_total_mass = 0
     for i in range(K):
-        initial_total_mass += int.simps(solq1[0][:,i],DG_model_pipe.x[:,i])
-        end_total_mass += int.simps(solq1[-1][:,i],DG_model_pipe.x[:,i])
+        initial_total_mass += int.simps(np.reshape(solq1[0],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
+        end_total_mass += int.simps(np.reshape(solq1[-1],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
 
 
     print('Initial total mass: ' + str(initial_total_mass))
     print('End total mass: ' + str(end_total_mass))
     print('Mass difference: ' + str(initial_total_mass-end_total_mass))
-    '''
-    xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
 
-    plt.plot(xVec, u[-1],label=str(N))
-    plt.grid(True)
+    xVec = DG_model_pipe.x.flatten('F')
+    plt.plot(xVec, u[-1],label=str(K))
+plt.grid(True)
 plt.legend()
 plt.show()
     #%%
@@ -116,5 +121,5 @@ plt.show()
 '''
 
 #%%
-animateSolution(xVec,time[0:-1:20],u[0:-1:20])
+#animateSolution(xVec,time[0:-1:20],u[0:-1:20])
 
