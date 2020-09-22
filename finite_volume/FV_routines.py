@@ -356,12 +356,25 @@ class Pipe1D(FV_1D):
         self.p0 = p0
         self.diameter = diameter
         self.A = (diameter/2)**2 * np.pi
+    '''
+    def f_leak(self, time, xElementL, tl):
 
+        f_l = np.zeros((self.x.shape))
+
+        for i in range(len(tl)):
+            if time > tl[i, 0] and time < tl[i, 1]:
+                f_l[:, xElementL] = 1.
+
+        return f_l
+    '''
     def RHS(self, t, q1, q2):
+
+
+        #f_l = self.f_leak(t, self.xVolume, self.tl)
 
         pressure = self.c*self.c*(q1/self.A-self.rho0) + self.p0
 
-        rhsq1 = -1/self.dx*np.dot(self.D_p,q2)
+        rhsq1 = -1/self.dx*np.dot(self.D_p,q2)# -1/self.dx*f_l
         rhsq2 = -1/self.dx*(np.dot(self.D_u,np.dot(self.I_u,q2*q2)/q1) + np.dot(self.D_u,pressure)*self.A)
 
         #rhsq2[0],rhsq2[-1] = 0,0

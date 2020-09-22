@@ -40,7 +40,7 @@ plt.figure()
 solsu = []
 solsrhoa = []
 solsp = []
-for N in [2]:
+for N in [4]:
     #N = 2
     K = 250
 
@@ -58,35 +58,37 @@ for N in [2]:
     DG_model_pipe.StartUp()
 
     xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
-    xl = 1000
+    xl = 1548
     tl = np.array([[20.,1000.]])
-    Cv = 1.04e-4
+    Cv = 4.05e-4
     mu = 1.04e-1
     initInflow = 2.
     initOutPres = 5e5
 
-    FinalTime = 20.
+    FinalTime = 300.
 
-    mu1 = xmax/2
-    sigma = .5
+    #mu1 = xmax/2
+    #sigma = .5
     #q1init =  100 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2)) + rho0
     #q1init *= DG_model_pipe.A
-    pinit = pamb*np.ones(DG_model_pipe.x.shape)
+    pinit = initOutPres*np.ones(DG_model_pipe.x.shape)
     q1init = ((pinit - DG_model_pipe.p0) / (DG_model_pipe.c ** 2) + DG_model_pipe.rho0) * DG_model_pipe.A#rho0*np.ones((N+1,K))*DG_model_pipe.A
-    q2init = initInflow*np.ones((N+1,K))
+    q2init = initInflow*np.ones((N+1,K))*q1init
 
-    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=True,stepsize=1e-1,
+    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=True,stepsize=2e0,
                                             xl=xl,tl=tl,leak_type='discharge',Cv=Cv,pamb=pamb,mu=mu,initInflow=initInflow,initOutPres=initOutPres)
     #%%
     rhoA = []
     u = []
     p = []
+    pBar = []
     rho = []
     for i in range(len(solq1)):
         rhoA.append(solq1[i].flatten('F'))
         rho.append((solq1[i]/DG_model_pipe.A).flatten('F'))
         u.append(np.divide(solq2[i],solq1[i]).flatten('F'))
         p.append(np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
+        pBar.append(1e-5*np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
 
     solsu.append(u)
     solsrhoa.append(rhoA)
@@ -105,6 +107,17 @@ for N in [2]:
             mass += int.simps(np.reshape(solq1[t],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         total_mass.append(mass)
 
+    leaked_mass = []
+    for t in range(len(time)):
+        leak = DG_model_pipe.f_leak(time[t],DG_model_pipe.xElementL,tl,pressure=p[t],rho=rho[t])
+        #leak = DG_model_pipe.rx*leak
+        #leak_element = 0
+        #for i in range(K):
+        #    pdb.set_trace()
+        #    leak_element += int.simps(leak[:, i], DG_model_pipe.x[:, i])
+        leaked_mass.append(leak[0,DG_model_pipe.xElementL])
+
+
 
     print('Initial total mass: ' + str(initial_total_mass))
     print('End total mass: ' + str(end_total_mass))
@@ -114,15 +127,24 @@ for N in [2]:
     plt.plot(xVec, u[-1],label=str(K))
 plt.grid(True)
 plt.legend()
+#plt.show()
+
+plt.figure()
+plt.plot(time,leaked_mass)
+plt.grid(True)
+plt.legend(['Leaked Mass'])
+plt.xlabel('Time (s)')
+plt.ylabel('Mass Flow Through Leak (kg/s)')
+plt.savefig('leaked_mass')
 plt.show()
 
 plt.figure()
 plt.plot(time,total_mass)
 plt.grid(True)
 plt.legend(['Total Mass'])
-plt.show()
+#plt.show()
     #%%
-
+'''
 xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
 plt.figure()
 plt.plot(xVec,u[-1])
@@ -141,8 +163,8 @@ plt.plot(xVec,p[-1])
 plt.grid(True)
 plt.legend(['p'])
 plt.show()
-
+'''
 
 #%%
-animateSolution(xVec,time[0:-1],u[0:-1])
+animateSolution(xVec,time[0:-1],pBar[0:-1])
 

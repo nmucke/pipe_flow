@@ -438,6 +438,7 @@ class Pipe1D(DG_1D):
         self.p0 = p0
         self.diameter = diameter
         self.A = (diameter/2)**2 * np.pi
+        self.L = xmax-xmin
 
 
     def f_leak(self,time,xElementL,tl,pressure=0,rho=0):
@@ -455,6 +456,34 @@ class Pipe1D(DG_1D):
                         pdb.set_trace()
                     f_l[:, xElementL] = self.Cv*np.sqrt(lol)
         return f_l
+
+    def Boundary_Conditions(self,q1,q2):
+        q1in = q1[self.vmapI]
+        q1out = ((self.pOut - self.p0) / (self.c ** 2) + self.rho0) * self.A
+        q2in = self.uIn * q1in
+        q2out = q2[self.vmapO]
+        pin = self.c * self.c * (q1in / self.A - self.rho0) + self.p0
+        pout = self.pOut
+        return q1in, q1out, q2in, q2out, pin, pout
+
+    def Steady_State_Solve(self):
+
+        rhoOut = (self.pOut - self.p0) / (self.c ** 2) + self.rho0
+        uOut = self.uIn*self.rho0*self.A/ (rhoOut * self.A)
+
+        f_l = 0.01
+        pIn = 0.5*f_l*rhoOut*uOut*np.abs(uOut)*(np.pi*self.diameter)*(self.L/self.A) + self.pOut
+        rhoIn = (pIn - self.p0) / (self.c ** 2) + self.rho0
+        #uIn = self.uIn*self.rho0*self.A/(rhoIn * self.A)
+
+        pInit = (self.pOut - pIn) / self.L * self.x + pIn
+        uInit = (uOut - self.uIn) / self.L * self.x + self.uIn
+
+
+        q1 = ((pInit - self.p0) / (self.c ** 2) + self.rho0)*self.A
+        q2 = q1*uInit
+
+        return q1,q2
 
     def PipeRHS1D(self,time,q1,q2):
 
@@ -563,13 +592,12 @@ class Pipe1D(DG_1D):
         q2 = q[-int(len(q)/2):]
 
         u = np.divide(q2, q1)
-        Red = q2 * self.diameter / self.A / self.mu
 
         pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
 
-        f_l = Pipe1D.f_leak(self, time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
+        self.f_l = self.f_leak(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
 
-        # f_friction = 1/(-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2
+
         '''
         q1Flux = q2
         q2Flux = np.divide(np.power(q2,2),q1) + pressure#q1*np.power(u,2) + pressure
@@ -624,12 +652,28 @@ class Pipe1D(DG_1D):
             self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
             self.pOut = -self.initOutPres*0.7/180*time + self.initOutPres*(1+0.7/180*20)
 
+        q1in, q1out, q2in, q2out, pin, pout = self.Boundary_Conditions(q1,q2)
+
+        '''
         q1in = q1[self.vmapI]  # q1[self.vmapO]#q1[self.vmapI]
         q1out = ((self.pOut - self.p0) / (self.c ** 2) + self.rho0) * self.A  # self.c*self.c*(q1/self.A-self.rho0) + self.p0#q1[self.vmapI]#q1[self.vmapO]#self.A*((1e5-self.p0)/(self.c*self.c)+self.rho0)#q1[self.vmapO]
         q2in = self.uIn*q1in #q2[self.vmapO]
         q2out = q2[self.vmapO]  # 0.0#q2[self.vmapO]
-        pin = self.c * self.c * (q1in / self.A - self.rho0) + self.p0
+        pin =self.c * self.c * (q1in / self.A - self.rho0) + self.p0 # 0.5 * 0.01 * q1out/self.A * q2out/q1out * np.abs(q2out/q1out) * (np.pi * self.diameter) * (self.xmax / self.A) + self.pOut# self.c * self.c * (q1in / self.A - self.rho0) + self.p0
         pout = self.pOut  # self.c*self.c*(q1out/self.A-self.rho0) + self.p0
+
+        if time < 1:
+            pressure = (pout-pin)/self.xmax * self.x + pin
+            pressure = pressure.flatten('F')
+            q1in = ((pin - self.p0) / (
+                        self.c ** 2) + self.rho0) * self.A
+            q1out = ((pout- self.p0) / (
+                        self.c ** 2) + self.rho0) * self.A
+
+            q2in = self.uIn * q1in
+            q2out = q2[self.vmapO]
+        '''
+
 
         nx = self.nx.flatten('F')
 
@@ -657,14 +701,18 @@ class Pipe1D(DG_1D):
         dq1Flux = np.reshape(dq1Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
         dq2Flux = np.reshape(dq2Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
 
-        rhsq1 = (-self.rx * np.dot(self.Dr, q1Flux) + np.dot(self.LIFT, self.Fscale * dq1Flux)) - self.rx * f_l
-        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux))  # - self.rx*0.5*f_friction/self.diameter*q2*np.abs(u)
+        Red = q1 * self.diameter *np.abs(u) / self.A / self.mu
+        f_friction = 1/(-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2
+        friction_term = 0.5*self.diameter*np.pi*f_friction*q2*np.abs(u)
+        friction_term = np.reshape(friction_term,(self.N+1,self.K),'F')
+
+        rhsq1 = (-self.rx * np.dot(self.Dr, q1Flux) + np.dot(self.LIFT, self.Fscale * dq1Flux)) - self.rx * self.f_l
+        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux))  - self.rx * friction_term
 
         rhsq1 = rhsq1.flatten('F')
         rhsq2 = rhsq2.flatten('F')
 
 
-        #print(time)
         return np.concatenate((rhsq1,rhsq2),axis=0)
 
     def ExplicitIntegration(self,q1,q2,FinalTime):
@@ -769,6 +817,7 @@ class Pipe1D(DG_1D):
         self.uIn = initInflow
         self.pOut = initOutPres
 
+        q1,q2 = self.Steady_State_Solve()
 
         q1 = DG_1D.SlopeLimitN(self,q1)
         q2 = DG_1D.SlopeLimitN(self,q2)
@@ -777,7 +826,6 @@ class Pipe1D(DG_1D):
         if implicit:
             solq1, solq2, tVec = self.ImplicitIntegration(q1, q2)
         else:
-
             solq1, solq2, tVec = Pipe1D.ExplicitIntegration(self,q1,q2,FinalTime)
         t1 = timing.time()
 

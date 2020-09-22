@@ -75,7 +75,7 @@ plt.show()
 '''
 
 
-xmin, xmax = 0,5
+xmin, xmax = 0,100
 num_volumes = 1000
 
 error = []
@@ -85,9 +85,9 @@ for num_volumes in vec:
 
     LSWE_model = FV.LSWE(xmin=xmin,xmax=xmax,num_volumes=num_volumes,d0=1,g=9.81)
 
-    FinalTime = 5
+    FinalTime = 0.25
 
-    mu = 2.5
+    mu = xmax/2
     sigma = 0.1
     q1init = 1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((LSWE_model.xmid - mu) / sigma, 2))
     #q1init = np.cos(LSWE_model.xmid)
