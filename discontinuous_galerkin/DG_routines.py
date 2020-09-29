@@ -63,7 +63,6 @@ def Vandermonde1D(x,alpha,beta,N):
     V1D = np.zeros((len(x),N+1))
 
     for i in range(0,N+1):
-
         V1D[:,i] = JacobiP(x,alpha,beta,i)
     return V1D
 
@@ -457,7 +456,59 @@ class Pipe1D(DG_1D):
                     f_l[:, xElementL] = self.Cv*np.sqrt(lol)
         return f_l
 
-    def Boundary_Conditions(self,q1,q2):
+    def ComputeJacobian(self,q):
+
+        m = 2*((self.N+1)*self.K)
+
+        J = np.zeros((m,m))
+
+        F = -self.PipeRHS1DImplicit(0,q)
+        for col in range(m):
+            pert = np.zeros(m)
+            pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(q[col]), 1)
+            pert[col] = pert_jac
+
+            qpert = q + pert
+            Fpert = -self.PipeRHS1DImplicit(0,qpert)
+
+            J[:,col] = (Fpert-F) / pert_jac
+
+        return J
+
+    def SteadyStateNewton(self,q):
+        newton_tol = 1e-6
+        MaxNewtonIter = 50
+
+        LHS = self.ComputeJacobian(q)
+
+        newton_error = 1e2
+        iterations = 0
+        q_old = q
+        while newton_error > newton_tol and iterations < MaxNewtonIter:
+
+            RHS = self.PipeRHS1DImplicit(0,q_old)
+
+            delta_q = np.linalg.solve(LHS, RHS)
+
+            q_old = q_old + delta_q
+
+            newton_error = np.max(np.abs(delta_q))
+            iterations = iterations + 1
+
+        return q_old
+
+
+    def SteadyStateSolve(self,q):
+
+        q = self.SteadyStateNewton(q)
+
+        q1 = q[0:int(len(q)/2)]
+        q2 = q[-int(len(q)/2):]
+
+
+        return q1,q2
+
+    def BoundaryConditions(self,q1,q2):
         q1in = q1[self.vmapI]
         q1out = ((self.pOut - self.p0) / (self.c ** 2) + self.rho0) * self.A
         q2in = self.uIn * q1in
@@ -465,25 +516,6 @@ class Pipe1D(DG_1D):
         pin = self.c * self.c * (q1in / self.A - self.rho0) + self.p0
         pout = self.pOut
         return q1in, q1out, q2in, q2out, pin, pout
-
-    def Steady_State_Solve(self):
-
-        rhoOut = (self.pOut - self.p0) / (self.c ** 2) + self.rho0
-        uOut = self.uIn*self.rho0*self.A/ (rhoOut * self.A)
-
-        f_l = 0.01
-        pIn = 0.5*f_l*rhoOut*uOut*np.abs(uOut)*(np.pi*self.diameter)*(self.L/self.A) + self.pOut
-        rhoIn = (pIn - self.p0) / (self.c ** 2) + self.rho0
-        #uIn = self.uIn*self.rho0*self.A/(rhoIn * self.A)
-
-        pInit = (self.pOut - pIn) / self.L * self.x + pIn
-        uInit = (uOut - self.uIn) / self.L * self.x + self.uIn
-
-
-        q1 = ((pInit - self.p0) / (self.c ** 2) + self.rho0)*self.A
-        q2 = q1*uInit
-
-        return q1,q2
 
     def PipeRHS1D(self,time,q1,q2):
 
@@ -597,7 +629,6 @@ class Pipe1D(DG_1D):
 
         self.f_l = self.f_leak(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
 
-
         '''
         q1Flux = q2
         q2Flux = np.divide(np.power(q2,2),q1) + pressure#q1*np.power(u,2) + pressure
@@ -652,7 +683,7 @@ class Pipe1D(DG_1D):
             self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
             self.pOut = -self.initOutPres*0.7/180*time + self.initOutPres*(1+0.7/180*20)
 
-        q1in, q1out, q2in, q2out, pin, pout = self.Boundary_Conditions(q1,q2)
+        q1in, q1out, q2in, q2out, pin, pout = self.BoundaryConditions(q1,q2)
 
         '''
         q1in = q1[self.vmapI]  # q1[self.vmapO]#q1[self.vmapI]
@@ -701,17 +732,16 @@ class Pipe1D(DG_1D):
         dq1Flux = np.reshape(dq1Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
         dq2Flux = np.reshape(dq2Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
 
-        Red = q1 * self.diameter *np.abs(u) / self.A / self.mu
-        f_friction = 1/(-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2
-        friction_term = 0.5*self.diameter*np.pi*f_friction*q2*np.abs(u)
+        Red = q1 * self.diameter * np.abs(u) / self.A / self.mu
+        f_friction = 0.25*1/((-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2)
+        friction_term = 0.5*self.diameter*np.pi*f_friction*q1/self.A*u*u
         friction_term = np.reshape(friction_term,(self.N+1,self.K),'F')
 
         rhsq1 = (-self.rx * np.dot(self.Dr, q1Flux) + np.dot(self.LIFT, self.Fscale * dq1Flux)) - self.rx * self.f_l
-        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux))  - self.rx * friction_term
+        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux)) - friction_term
 
         rhsq1 = rhsq1.flatten('F')
         rhsq2 = rhsq2.flatten('F')
-
 
         return np.concatenate((rhsq1,rhsq2),axis=0)
 
@@ -789,7 +819,6 @@ class Pipe1D(DG_1D):
 
     def ImplicitIntegration(self, q1, q2):
 
-
         initCondition = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
         #system = SDIRK(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime,order=1, stepsize=self.stepsize, xmin=self.xmin,xmax=self.xmax, K=self.K, N=self.N)
@@ -817,10 +846,42 @@ class Pipe1D(DG_1D):
         self.uIn = initInflow
         self.pOut = initOutPres
 
-        q1,q2 = self.Steady_State_Solve()
+        q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
+        q1,q2 = self.SteadyStateSolve(q)
 
-        q1 = DG_1D.SlopeLimitN(self,q1)
-        q2 = DG_1D.SlopeLimitN(self,q2)
+        '''
+        benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',',dtype=np.float64)
+        ben_xu = benjamin_u[:, 0]
+        ben_u = benjamin_u[:, 1]
+
+        benjamin_p = np.genfromtxt('p_initial.csv', delimiter=',')
+        ben_xp = benjamin_p[:, 0]
+        ben_p = benjamin_p[:, 1]
+
+        plt.figure()
+        plt.plot(self.x.flatten('F'),np.divide(q2,q1),linewidth=2,label='Nikolaj')
+        plt.plot(ben_xu,ben_u,linewidth=2,label='Benjamin')
+        plt.xlabel('Position')
+        plt.legend()
+        plt.grid()
+        plt.title('Velocity')
+        plt.savefig('velocity_comparison')
+        plt.show()
+
+        pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
+        plt.figure()
+        plt.plot(self.x.flatten('F'), pressure,linewidth=2, label='Nikolaj')
+        plt.plot(ben_xp, ben_p,linewidth=2, label='Benjamin')
+        plt.xlabel('Position')
+        plt.legend()
+        plt.grid()
+        plt.title('Pressure')
+        plt.savefig('pressure_comparison')
+        plt.show()
+        '''
+
+        q1 = self.SlopeLimitN(np.reshape(q1,(self.N+1,self.K),'F'))
+        q2 = self.SlopeLimitN(np.reshape(q2,(self.N+1,self.K),'F'))
 
         t0 = timing.time()
         if implicit:
