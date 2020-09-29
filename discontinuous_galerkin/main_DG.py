@@ -36,18 +36,13 @@ def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
 
     # save the animation as mp4 video file
     anim.save(gif_name + '.mp4',writer=writer)
-
-benjamin_data = np.genfromtxt('benjamin_data.csv',delimiter=',')
-benjamin_time = benjamin_data[:,0]
-benjamin_mass_leak = benjamin_data[:,1]
-
-plt.figure()
+#plt.figure()
 solsu = []
 solsrhoa = []
 solsp = []
-for K in [250]:
-    N = 3
-    #K = 25
+for N in [3]:
+    #N = 2
+    K = 100
 
     xmin = 0.
     xmax = 5000.
@@ -64,13 +59,14 @@ for K in [250]:
 
     xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
     xl = 1548
-    tl = np.array([[.1,1000.]])
-    Cv = 4e-4
+    tl = np.array([[20.,1000.]])
+
+    Cv = 4.05e-4
     mu = 1.04e-1
     initInflow = 2.
     initOutPres = 5e5
 
-    FinalTime = 400.
+    FinalTime = 300.
 
     #mu1 = xmax/2
     #sigma = .5
@@ -80,7 +76,7 @@ for K in [250]:
     q1init = ((pinit - DG_model_pipe.p0) / (DG_model_pipe.c ** 2) + DG_model_pipe.rho0) * DG_model_pipe.A#rho0*np.ones((N+1,K))*DG_model_pipe.A
     q2init = initInflow*np.ones((N+1,K))*q1init
 
-    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=True,stepsize=2e0,
+    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=False,stepsize=1e0,
                                             xl=xl,tl=tl,leak_type='discharge',Cv=Cv,pamb=pamb,mu=mu,initInflow=initInflow,initOutPres=initOutPres)
     #%%
     rhoA = []
@@ -105,13 +101,14 @@ for K in [250]:
         initial_total_mass += int.simps(np.reshape(solq1[0],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         end_total_mass += int.simps(np.reshape(solq1[-1],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
 
+    '''
     total_mass = []
     for t in range(len(time)):
         mass = 0
         for i in range(K):
             mass += int.simps(np.reshape(solq1[t],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         total_mass.append(mass)
-
+    '''
     leaked_mass = []
     for t in range(len(time)):
         leak = DG_model_pipe.f_leak(time[t],DG_model_pipe.xElementL,tl,pressure=p[t],rho=rho[t])
@@ -122,19 +119,39 @@ for K in [250]:
         #    leak_element += int.simps(leak[:, i], DG_model_pipe.x[:, i])
         leaked_mass.append(leak[0,DG_model_pipe.xElementL])
 
-    print('Initial total mass: ' + str(initial_total_mass))
-    print('End total mass: ' + str(end_total_mass))
-    print('Mass difference: ' + str(initial_total_mass-end_total_mass))
+    pressure_leak = []
+    for t in range(len(time)):
+        mean_pressure = np.mean(np.reshape(pBar[t], (DG_model_pipe.Np, DG_model_pipe.K), 'F')[:, DG_model_pipe.xElementL])
+        pressure_leak.append(mean_pressure)
+
+    #print('Initial total mass: ' + str(initial_total_mass))
+    #print('End total mass: ' + str(end_total_mass))
+    #print('Mass difference: ' + str(initial_total_mass-end_total_mass))
 
     xVec = DG_model_pipe.x.flatten('F')
     #plt.plot(xVec, u[-1],label=str(K))
-    plt.plot(time,leaked_mass,linewidth=2.,label='Discontinuous Galerkin')#,label='DG, N=' + str(N))
 #plt.grid(True)
 #plt.legend()
 #plt.show()
 
-#plt.figure()
-plt.plot(benjamin_time,benjamin_mass_leak, label='Rosa',linewidth=2)
+benjamin_data = np.genfromtxt('benjamin_data.csv',delimiter=',')
+benjamin_time = benjamin_data[:,0]
+benjamin_mass_leak = benjamin_data[:,1]
+
+plt.figure()
+plt.plot(time,pressure_leak,linewidth=2,label='Pressure at Leak point')
+plt.vlines(20,ymin=0,ymax=np.max(pressure_leak)+2,colors='red',label='Leak start')
+plt.ylim([np.min(pressure_leak)-1,np.max(pressure_leak)+1])
+plt.grid(True)
+plt.legend()
+plt.xlabel('Time (s)')
+plt.ylabel('Pressure (bar)')
+plt.savefig('pressure_at_leak')
+plt.show()
+
+plt.figure()
+plt.plot(time,leaked_mass,label='DG',linewidth=2)
+plt.plot(benjamin_time,benjamin_mass_leak,label='Rosa',linewidth=2)
 plt.grid(True)
 plt.legend()
 plt.xlabel('Time (s)')
@@ -142,13 +159,13 @@ plt.ylabel('Mass Flow Through Leak (kg/s)')
 plt.savefig('leaked_mass')
 plt.show()
 
+'''
 plt.figure()
 plt.plot(time,total_mass)
 plt.grid(True)
 plt.legend(['Total Mass'])
 #plt.show()
     #%%
-'''
 xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
 plt.figure()
 plt.plot(xVec,u[-1])
@@ -170,5 +187,5 @@ plt.show()
 '''
 
 #%%
-animateSolution(xVec,time[0:-1],u[0:-1])
+animateSolution(xVec,time[0:-1:50],pBar[0:-1:50])
 

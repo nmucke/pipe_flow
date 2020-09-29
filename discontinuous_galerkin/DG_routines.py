@@ -6,7 +6,6 @@ import scipy.special as sci
 import scipy.sparse as sps
 import scipy.integrate as integrate
 import time as timing
-import RungeKuttaNew as RK
 import scipy.linalg as scilin
 
 import scipy.optimize as opt
@@ -154,7 +153,7 @@ class DG_1D:
         self.vb = np.transpose(self.EtoV[:, 1])
         self.x = np.ones((self.Np, 1)) * self.VX[self.va.astype(int)] + 0.5 * (np.reshape(self.r, (len(self.r), 1)) + 1) \
                 * (self.VX[self.vb.astype(int)] - self.VX[self.va.astype(int)])
-        self.deltax = np.min(np.abs(self.x[0, :] - self.x[1, :]))
+        self.deltax = np.min(np.abs(self.x[0, :] - self.x[-1, :]))
 
         fmask1 = np.where(np.abs(self.r + 1.) < self.NODETOL)[0]
         fmask2 = np.where(np.abs(self.r - 1.) < self.NODETOL)[0]
@@ -273,17 +272,28 @@ class DG_1D:
 
         return mfunc
 
+    def minmodB(self,v,M,h):
+
+        mfunc = v[0,:]
+        ids = np.argwhere(np.abs(mfunc) > M*h*h)
+
+        if np.shape(ids)[0]>0:
+            mfunc[ids[:,0]] = self.minmod(v[:,ids[:,0]])
+
+        return mfunc
+
     def SlopeLimitLin(self,ul,xl,vm1,v0,vp1):
 
         ulimit = ul
         h = xl[self.Np-1,:]-xl[0,:]
+
         x0 = np.ones((self.Np,1))*(xl[0,:]+h/2)
 
         hN = np.ones((self.Np,1))*h
 
         ux = (2/hN) * np.dot(self.Dr,ul)
 
-        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(DG_1D.minmod(self,np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0)))
+        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
 
         return ulimit
 
@@ -299,7 +309,6 @@ class DG_1D:
 
         ue1 = u[0,:]
         ue2 = u[-1:,:]
-
 
         vk = v
         vkm1 = np.concatenate((v[0,0:1],v[0,0:self.K-1]),axis=0)
@@ -359,8 +368,8 @@ class BDF2(DG_1D):
 
     def InitialStep(self):
 
-        J = self.ComputeJacobian(self.sol[-1])
-
+        self.J = self.ComputeJacobian(self.sol[-1])
+        J = self.J
         LHS = 1/self.deltat*np.eye(self.m) - J
 
         newton_error = 1e2
@@ -380,7 +389,7 @@ class BDF2(DG_1D):
 
     def UpdateState(self):
 
-        J = self.ComputeJacobian(self.sol[-1])
+        J = self.J#self.ComputeJacobian(self.sol[-1])
 
         LHS = 1 / self.deltat * np.eye(self.m) - self.beta*J
 
@@ -449,11 +458,14 @@ class Pipe1D(DG_1D):
                     f_l[:, xElementL] = 1.
         elif self.leak_type == 'discharge':
             for i in range(len(tl)):
-                if time > tl[i, 0] and time < tl[i, 1]:
-                    lol = rho[xElementL]*(pressure[xElementL]-self.pamb)
-                    if lol < 0:
-                        pdb.set_trace()
-                    f_l[:, xElementL] = self.Cv*np.sqrt(lol)
+                if time >= tl[i, 0] and time < tl[i, 1]:
+                    mean_pressure = np.mean(np.reshape(pressure,(self.Np,self.K),'F')[:,xElementL])
+                    mean_rho = np.mean(np.reshape(rho,(self.Np,self.K),'F')[:,xElementL])
+                    discharge_sqrt_coef = mean_rho*(mean_pressure-self.pamb)
+                    if discharge_sqrt_coef < 0:
+                        print('Discharge sqrt coefficient is negative!')
+                        break
+                    f_l[:, xElementL] = self.Cv*np.sqrt(discharge_sqrt_coef)
         return f_l
 
     def ComputeJacobian(self,q):
@@ -462,21 +474,21 @@ class Pipe1D(DG_1D):
 
         J = np.zeros((m,m))
 
-        F = -self.PipeRHS1DImplicit(0,q)
+        F = -self.PipeRHS1D(0,q)
         for col in range(m):
             pert = np.zeros(m)
             pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(q[col]), 1)
             pert[col] = pert_jac
 
             qpert = q + pert
-            Fpert = -self.PipeRHS1DImplicit(0,qpert)
+            Fpert = -self.PipeRHS1D(0,qpert)
 
             J[:,col] = (Fpert-F) / pert_jac
 
         return J
 
     def SteadyStateNewton(self,q):
-        newton_tol = 1e-6
+        newton_tol = 1e-8
         MaxNewtonIter = 50
 
         LHS = self.ComputeJacobian(q)
@@ -486,7 +498,7 @@ class Pipe1D(DG_1D):
         q_old = q
         while newton_error > newton_tol and iterations < MaxNewtonIter:
 
-            RHS = self.PipeRHS1DImplicit(0,q_old)
+            RHS = self.PipeRHS1D(0,q_old)
 
             delta_q = np.linalg.solve(LHS, RHS)
 
@@ -517,108 +529,7 @@ class Pipe1D(DG_1D):
         pout = self.pOut
         return q1in, q1out, q2in, q2out, pin, pout
 
-    def PipeRHS1D(self,time,q1,q2):
-
-        q1 = q1.flatten('F')
-        q2 = q2.flatten('F')
-
-        u = np.divide(q2,q1)
-        Red = q2*self.diameter/self.A/self.mu
-
-        pressure = self.c*self.c*(q1/self.A-self.rho0) + self.p0
-
-        f_l = Pipe1D.f_leak(self, time, self.xElementL, self.tl,pressure=pressure,rho=q1/self.A)
-
-        #f_friction = 1/(-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2
-        '''
-        q1Flux = q2
-        q2Flux = np.divide(np.power(q2,2),q1) + pressure#q1*np.power(u,2) + pressure
-
-        lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
-
-        C = np.max(lam)
-
-        nx = self.nx.flatten('F')
-
-        f1star = 1/2*(q1Flux[self.vmapM] + q1Flux[self.vmapP]) + C/2. * nx*(q1[self.vmapM] - q1[self.vmapP])
-        f2star = 1/2*(q2Flux[self.vmapM] + q2Flux[self.vmapP]) + C/2. * nx*(q2[self.vmapM] - q2[self.vmapP])
-        dq1Flux = nx*(q1Flux[self.vmapM]-f1star)
-        dq2Flux = nx*(q2Flux[self.vmapM]-f2star)
-        
-        uIn = 0.
-        uOut = 0.
-        q2in = uIn*q1[self.vmapI]
-        q2out = uOut*q1[self.vmapO]
-
-        q1FluxIn = q2in
-        q2FluxIn = q1[self.vmapI] * np.power(uIn, 2) + pressure[self.vmapI]
-        q1FluxOut = q2out
-        q2FluxOut = q1[self.vmapO] * np.power(uOut, 2) + pressure[self.vmapO]
-
-
-        dq1Flux[self.mapI] = np.dot(nx[self.mapI],q1Flux[self.vmapI]-q1FluxIn)/2
-        dq2Flux[self.mapI] = np.dot(nx[self.mapI],q2Flux[self.vmapI]-q2FluxIn)/2 - np.dot(C,q2[self.vmapI]-q2in)
-
-        dq1Flux[self.mapO] = np.dot(nx[self.mapO],q1Flux[self.vmapO]-q1FluxOut)/2
-        dq2Flux[self.mapO] = np.dot(nx[self.mapO],q2Flux[self.vmapO]-q2FluxOut)/2 - np.dot(C,q2[self.vmapO]-q2out)
-
-        '''
-        cvel = self.c
-        lm = np.abs(np.divide(q2, q1)) + cvel
-
-        q1Flux = q2
-        q2Flux = np.divide(np.power(q2, 2), q1) + pressure*self.A
-
-        dq1 = q1[self.vmapM] - q1[self.vmapP]
-        dq2 = q2[self.vmapM] - q2[self.vmapP]
-
-        dq1Flux = q1Flux[self.vmapM] - q1Flux[self.vmapP]
-        dq2Flux = q2Flux[self.vmapM] - q2Flux[self.vmapP]
-
-        LFc = np.maximum((lm[self.vmapM]), (lm[self.vmapP]))
-
-        dq1Flux = self.nx.flatten('F') * dq1Flux / 2. - LFc / 2. * dq1
-        dq2Flux = self.nx.flatten('F') * dq2Flux / 2. - LFc / 2. * dq2
-
-        q1in = q1[self.vmapI]#q1[self.vmapO]#q1[self.vmapI]
-        q1out = ((pressure[self.vmapO]-self.p0)/(self.c**2) + self.rho0)*self.A#self.c*self.c*(q1/self.A-self.rho0) + self.p0#q1[self.vmapI]#q1[self.vmapO]#self.A*((1e5-self.p0)/(self.c*self.c)+self.rho0)#q1[self.vmapO]
-        q2in = 2*q1[self.vmapI]*self.A#q2[self.vmapO]#0.0
-        q2out = q2[self.vmapO]#0.0#q2[self.vmapO]
-        pin = self.c*self.c*(q1in/self.A-self.rho0) + self.p0
-        pout = self.p0#self.c*self.c*(q1out/self.A-self.rho0) + self.p0
-
-        nx = self.nx.flatten('F')
-
-        q1FluxIn = q2in
-        q2FluxIn = np.divide(np.power(q2in, 2), q1in) + pin*self.A
-
-        lmIn = lm[self.vmapI] / 2
-        nxIn = nx[self.mapI]
-
-        dq1Flux[self.mapI] = np.dot(nxIn, q1Flux[self.vmapI] - q1FluxIn) / 2 - np.dot(lmIn, q1[self.vmapI] - q1in)
-        dq2Flux[self.mapI] = np.dot(nxIn, q2Flux[self.vmapI] - q2FluxIn) / 2 - np.dot(lmIn, q2[self.vmapI] - q2in)
-
-        q1FluxOut = q2out
-        q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout*self.A
-
-        lmOut = lm[self.vmapO] / 2
-        nxOut = nx[self.mapO]
-
-        dq1Flux[self.mapO] = np.dot(nxOut, q1Flux[self.vmapO] - q1FluxOut) / 2 - np.dot(lmOut, q1[self.vmapO] - q1out)
-        dq2Flux[self.mapO] = np.dot(nxOut, q2Flux[self.vmapO] - q2FluxOut) / 2 - np.dot(lmOut, q2[self.vmapO] - q2out)
-
-        q1Flux = np.reshape(q1Flux, (self.Np, self.K), 'F')
-        q2Flux = np.reshape(q2Flux, (self.Np, self.K), 'F')
-
-        dq1Flux = np.reshape(dq1Flux,((self.Nfp*self.Nfaces,self.K)),'F')
-        dq2Flux = np.reshape(dq2Flux,((self.Nfp*self.Nfaces,self.K)),'F')
-
-        rhsq1 = (-self.rx*np.dot(self.Dr,q1Flux) + np.dot(self.LIFT,self.Fscale*dq1Flux)) - self.rx*f_l
-        rhsq2 = (-self.rx*np.dot(self.Dr,q2Flux) + np.dot(self.LIFT,self.Fscale*dq2Flux)) #- self.rx*0.5*f_friction/self.diameter*q2*np.abs(u)
-
-        return rhsq1,rhsq2
-
-    def PipeRHS1DImplicit(self,time,q):
+    def PipeRHS1D(self,time,q):
 
         q1 = q[0:int(len(q)/2)]
         q2 = q[-int(len(q)/2):]
@@ -629,39 +540,6 @@ class Pipe1D(DG_1D):
 
         self.f_l = self.f_leak(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
 
-        '''
-        q1Flux = q2
-        q2Flux = np.divide(np.power(q2,2),q1) + pressure#q1*np.power(u,2) + pressure
-
-        lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
-
-        C = np.max(lam)
-
-        nx = self.nx.flatten('F')
-
-        f1star = 1/2*(q1Flux[self.vmapM] + q1Flux[self.vmapP]) + C/2. * nx*(q1[self.vmapM] - q1[self.vmapP])
-        f2star = 1/2*(q2Flux[self.vmapM] + q2Flux[self.vmapP]) + C/2. * nx*(q2[self.vmapM] - q2[self.vmapP])
-        dq1Flux = nx*(q1Flux[self.vmapM]-f1star)
-        dq2Flux = nx*(q2Flux[self.vmapM]-f2star)
-
-        uIn = 0.
-        uOut = 0.
-        q2in = uIn*q1[self.vmapI]
-        q2out = uOut*q1[self.vmapO]
-
-        q1FluxIn = q2in
-        q2FluxIn = q1[self.vmapI] * np.power(uIn, 2) + pressure[self.vmapI]
-        q1FluxOut = q2out
-        q2FluxOut = q1[self.vmapO] * np.power(uOut, 2) + pressure[self.vmapO]
-
-
-        dq1Flux[self.mapI] = np.dot(nx[self.mapI],q1Flux[self.vmapI]-q1FluxIn)/2
-        dq2Flux[self.mapI] = np.dot(nx[self.mapI],q2Flux[self.vmapI]-q2FluxIn)/2 - np.dot(C,q2[self.vmapI]-q2in)
-
-        dq1Flux[self.mapO] = np.dot(nx[self.mapO],q1Flux[self.vmapO]-q1FluxOut)/2
-        dq2Flux[self.mapO] = np.dot(nx[self.mapO],q2Flux[self.vmapO]-q2FluxOut)/2 - np.dot(C,q2[self.vmapO]-q2out)
-
-        '''
         cvel = self.c
         lm = np.abs(np.divide(q2, q1)) + cvel
 
@@ -679,31 +557,11 @@ class Pipe1D(DG_1D):
         dq1Flux = self.nx.flatten('F') * dq1Flux / 2. - LFc / 2. * dq1
         dq2Flux = self.nx.flatten('F') * dq2Flux / 2. - LFc / 2. * dq2
 
-        if time > 20. and time < 200.:
+        if time >= self.tl[0,0] and time <= 200:
             self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
             self.pOut = -self.initOutPres*0.7/180*time + self.initOutPres*(1+0.7/180*20)
 
         q1in, q1out, q2in, q2out, pin, pout = self.BoundaryConditions(q1,q2)
-
-        '''
-        q1in = q1[self.vmapI]  # q1[self.vmapO]#q1[self.vmapI]
-        q1out = ((self.pOut - self.p0) / (self.c ** 2) + self.rho0) * self.A  # self.c*self.c*(q1/self.A-self.rho0) + self.p0#q1[self.vmapI]#q1[self.vmapO]#self.A*((1e5-self.p0)/(self.c*self.c)+self.rho0)#q1[self.vmapO]
-        q2in = self.uIn*q1in #q2[self.vmapO]
-        q2out = q2[self.vmapO]  # 0.0#q2[self.vmapO]
-        pin =self.c * self.c * (q1in / self.A - self.rho0) + self.p0 # 0.5 * 0.01 * q1out/self.A * q2out/q1out * np.abs(q2out/q1out) * (np.pi * self.diameter) * (self.xmax / self.A) + self.pOut# self.c * self.c * (q1in / self.A - self.rho0) + self.p0
-        pout = self.pOut  # self.c*self.c*(q1out/self.A-self.rho0) + self.p0
-
-        if time < 1:
-            pressure = (pout-pin)/self.xmax * self.x + pin
-            pressure = pressure.flatten('F')
-            q1in = ((pin - self.p0) / (
-                        self.c ** 2) + self.rho0) * self.A
-            q1out = ((pout- self.p0) / (
-                        self.c ** 2) + self.rho0) * self.A
-
-            q2in = self.uIn * q1in
-            q2out = q2[self.vmapO]
-        '''
 
 
         nx = self.nx.flatten('F')
@@ -748,20 +606,23 @@ class Pipe1D(DG_1D):
     def ExplicitIntegration(self,q1,q2,FinalTime):
 
         time = 0
+        m = self.Np*self.K
 
-        mindeltax = np.min(np.abs(self.x[0,:]-self.x[1,:]))
+        mindeltax = self.x[1,0]-self.x[0,0]#self.deltax
 
-        CFL = .8
+        CFL = .1
 
         solq1 = [q1]
         solq2 = [q2]
         tVec = [time]
 
 
-        resq1 = np.zeros((self.Np,self.K))
-        resq2 = np.zeros((self.Np,self.K))
+        resq1 = np.zeros((m))
+        resq2 = np.zeros((m))
 
         i = 0
+
+        q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
         while time < FinalTime:
 
@@ -769,42 +630,48 @@ class Pipe1D(DG_1D):
             lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
             C = np.max(lam)
             dt = CFL * mindeltax / C
+            '''
             for INTRK in range(0, 5):
-                rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1, q2)
+                rhsq = self.PipeRHS1D(time, q)
 
-                resq1 = self.rk4a[INTRK] * resq1 + dt * rhsq1
-                resq2 = self.rk4a[INTRK] * resq2 + dt * rhsq2
+                resq1 = self.rk4a[INTRK] * resq1 + dt * rhsq[0:int(m)]
+                resq2 = self.rk4a[INTRK] * resq2 + dt * rhsq[-int(m):]
 
-                q1 = q1 + self.rk4b[INTRK] * resq1
-                q2 = q2 + self.rk4b[INTRK] * resq2
+                q1 = q1 + self.rk4b[INTRK] * np.reshape(resq1, (self.Np, self.K), 'F')
+                q2 = q2 + self.rk4b[INTRK] * np.reshape(resq2, (self.Np, self.K), 'F')
 
                 q1 = DG_1D.SlopeLimitN(self, q1)
                 q2 = DG_1D.SlopeLimitN(self, q2)
 
+                q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
             '''
-            rhsq1,rhsq2 = Pipe1D.PipeRHS1D(self,time,q1,q2)
+            rhs = self.PipeRHS1D(time,q)
+            rhsq1,rhsq2 = rhs[0:int(m)],rhs[-int(m):]
+            rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
             q1_1 = q1 + dt*rhsq1
             q2_1 = q2 + dt*rhsq2
-
             q1_1 = DG_1D.SlopeLimitN(self, q1_1)
             q2_1 = DG_1D.SlopeLimitN(self, q2_1)
+            q_1 = np.concatenate((q1_1.flatten('F'), q2_1.flatten('F')), axis=0)
 
-
-            rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1_1, q2_1)
+            rhs = self.PipeRHS1D(time,q_1)
+            rhsq1,rhsq2 = rhs[0:int(m)],rhs[-int(m):]
+            rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
             q1_2 = (3*q1 + q1_1 + dt * rhsq1)/4
             q2_2 = (3*q2 + q2_1 + dt * rhsq2)/4
-
             q1_2 = DG_1D.SlopeLimitN(self, q1_2)
             q2_2 = DG_1D.SlopeLimitN(self, q2_2)
+            q_2 = np.concatenate((q1_2.flatten('F'), q2_2.flatten('F')), axis=0)
 
-            rhsq1, rhsq2 = Pipe1D.PipeRHS1D(self, time, q1_2, q2_2)
+            rhs = self.PipeRHS1D(time,q_2)
+            rhsq1,rhsq2 = rhs[0:int(m)],rhs[-int(m):]
+            rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
             q1 = (q1 + 2*q1_2 + 2*dt * rhsq1) / 3
             q2 = (q2 + 2*q2_2 + 2*dt * rhsq2) / 3
-
             q1 = DG_1D.SlopeLimitN(self, q1)
             q2 = DG_1D.SlopeLimitN(self, q2)
+            q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
-            '''
             solq1.append(q1.flatten('F'))
             solq2.append(q2.flatten('F'))
 
@@ -822,7 +689,7 @@ class Pipe1D(DG_1D):
         initCondition = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
         #system = SDIRK(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime,order=1, stepsize=self.stepsize, xmin=self.xmin,xmax=self.xmax, K=self.K, N=self.N)
-        system = BDF2(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime, stepsize=self.stepsize,xmin=self.xmin, xmax=self.xmax, K=self.K, N=self.N)
+        system = BDF2(self.PipeRHS1D, initCondition, t0=0, te=self.FinalTime, stepsize=self.stepsize,xmin=self.xmin, xmax=self.xmax, K=self.K, N=self.N)
         t_vec, solution = system.solve()
 
         #solution = integrate.solve_ivp(self.PipeRHS1DImplicit, [0, self.FinalTime], initCondition,method='RK45')
@@ -846,8 +713,41 @@ class Pipe1D(DG_1D):
         self.uIn = initInflow
         self.pOut = initOutPres
 
+
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
         q1,q2 = self.SteadyStateSolve(q)
+
+
+        benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',', dtype=np.float64)
+        ben_xu = benjamin_u[:, 0]
+        ben_u = benjamin_u[:, 1]
+
+        benjamin_p = np.genfromtxt('p_initial.csv', delimiter=',')
+        ben_xp = benjamin_p[:, 0]
+        ben_p = benjamin_p[:, 1]
+
+        plt.figure()
+        plt.plot(self.x.flatten('F'), np.divide(q2, q1), linewidth=2, label='Nikolaj')
+        plt.plot(ben_xu, ben_u, linewidth=2, label='Benjamin')
+        plt.xlabel('Position')
+        plt.legend()
+        plt.grid()
+        plt.title('Velocity')
+        plt.savefig('velocity_comparison')
+        plt.show()
+
+        pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
+        plt.figure()
+        plt.plot(self.x.flatten('F'), pressure, linewidth=2, label='Nikolaj')
+        plt.plot(ben_xp, ben_p, linewidth=2, label='Benjamin')
+        plt.xlabel('Position')
+        plt.legend()
+        plt.grid()
+        plt.title('Pressure')
+        plt.savefig('pressure_comparison')
+        plt.show()
+
+
 
         '''
         benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',',dtype=np.float64)
