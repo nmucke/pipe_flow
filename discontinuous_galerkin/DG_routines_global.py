@@ -19,7 +19,6 @@ def JacobiP(x,alpha,beta,N):
 
     PL = np.zeros((N+1, len(xp)))
 
-
     gamma0 = 2**(alpha + beta + 1) / (alpha + beta + 1) * gamma(alpha + 1) * gamma(beta + 1) / gamma(alpha + beta + 1)
     PL[0,:] = 1.0 / np.sqrt(gamma0)
     if N == 0:
@@ -76,7 +75,6 @@ def GradJacobiP(r,alpha,beta,N):
 def GradVandermonde1D(r,alpha,beta,N):
     DVr = np.zeros((len(r),N+1))
 
-
     for i in range(0,N+1):
 
         DVr[:,i:(i+1)] = GradJacobiP(r,alpha,beta,i)
@@ -124,7 +122,7 @@ def diracDelta(x):
     return f
 
 class DG_1D:
-    def __init__(self, xmin=0,xmax=1,K=10,N=5):
+    def __init__(self, xmin=0,xmax=1,K=10,N=5,poly='legendre'):
         self.xmin = xmin
         self.xmax = xmax
         self.K = K
@@ -139,14 +137,81 @@ class DG_1D:
         self.rk4b = np.array([ 1432997174477.0/9575080441755.0,5161836677717.0/13612068292357.0,1720146321549.0/2090206949498.0,3134564353537.0/4481467310338.0,2277821191437.0/14882151754819.0])
         self.rk4c = np.array([ 0.0,1432997174477.0/9575080441755.0,2526269341429.0/6820363962896.0,2006345519317.0/3224310063776.0,2802321613138.0/2924317926251.0])
 
-        self.r = JacobiGL(0,0,self.N)
-        self.V = Vandermonde1D(self.r,0,0,self.N)
+        if poly == 'legendre':
+            alpha = 0
+            beta = 0
+        elif poly == 'chebyshev':
+            alpha = -0.5
+            beta = -0.5
+
+        self.r = JacobiGL(alpha,beta,self.N)
+        self.V = Vandermonde1D(self.r,alpha,beta,self.N)
         self.invV = np.linalg.inv(self.V)
-        self.Dr = Dmatrix1D(self.r,0,0,self.N,self.V)
+        self.Dr = Dmatrix1D(self.r,alpha,beta,self.N,self.V)
         self.M = np.transpose(np.linalg.solve(np.transpose(self.invV),self.invV))
         self.invM = np.linalg.inv(self.M)
+        self.S = np.dot(self.M,self.Dr)
+        self.E = np.zeros((self.Np,self.Np))
+        self.E[0,0] = 1
+        self.F = np.zeros((self.Np,self.Np))
+        self.F[0,-1] = 1
+        self.G = np.zeros((self.Np,self.Np))
+        self.G[-1,0] = 1
+        self.H = np.zeros((self.Np,self.Np))
+        self.H[-1,-1] = 1
 
-        self.LIFT = lift1D(self.Np,self.Nfaces,self.Nfp,self.V)
+        I = np.eye(self.K)
+
+        self.M_global = np.kron(I,self.M)
+        self.M_global_inv = np.linalg.inv(self.M_global)
+
+        self.G_global = np.kron(I, self.S) + 0.5 * np.kron(I, self.E - self.H)
+        self.G_global = self.G_global + 0.5 * np.kron(np.eye(self.K, k=1), self.G) - 0.5 * np.kron(np.eye(self.K, k=-1), self.F)
+        self.G_global[-self.Np:,0:self.Np] = 0.5*self.G
+        self.G_global[0:self.Np, -self.Np:] = -0.5 * self.F
+        #self.D_global = np.linalg.solve(self.M_global, self.G_global)
+        self.D_global = np.dot(self.M_global_inv, self.G_global)
+
+        self.F_global = np.kron(I, self.H + self.E)
+        self.F_global = self.F_global - np.kron(np.eye(self.K, k=1), self.G) - np.kron(np.eye(self.K, k=-1), self.F)
+        self.F_global[-self.Np:, 0:self.Np] = -self.G
+        self.F_global[0:self.Np, -self.Np:] = -self.F
+        #self.F_global = np.linalg.solve(self.M_global, self.F_global)
+        self.F_global = np.dot(self.M_global_inv, self.F_global)
+
+        '''
+        self.G_global_left = np.kron(I,self.S) + 0.5*np.kron(I,self.E-self.H)
+        self.G_global_left = self.G_global_right = self.G_global_left + 0.5*np.kron(np.eye(self.K,k=1),self.G) - 0.5*np.kron(np.eye(self.K,k=-1),self.F)
+
+        self.G_global_left[0:self.Np,0:self.Np] = self.G_global_left[0:self.Np,0:self.Np]+0.5*self.E
+        self.G_global_left[-self.Np:,-self.Np:] = self.G_global_left[-self.Np:,-self.Np:]+0.5*self.H
+
+        self.G_global_right[-self.Np:,-self.Np:] = self.G_global_right[-self.Np:,-self.Np:]-0.5*self.H
+        self.G_global_right[0:self.Np,0:self.Np] = self.G_global_right[0:self.Np,0:self.Np]-0.5*self.E
+
+        self.D_global_left = np.linalg.solve(self.M_global,self.G_global_left)
+        self.D_global_right = np.linalg.solve(self.M_global,self.G_global_right)
+
+        self.F_global_left = 0.5*np.kron(I,self.H+self.E)
+        self.F_global_left = self.F_global_right = self.F_global_left - np.kron(np.eye(self.K,k=1),self.G) - np.kron(np.eye(self.K,k=-1),self.F)
+
+        self.F_global_left[0:self.Np, 0:self.Np] = self.F_global_left[0:self.Np, 0:self.Np] + self.E
+        self.F_global_left[-self.Np:, -self.Np:] = self.F_global_left[-self.Np:, -self.Np:] - self.H
+
+        self.F_global_right[-self.Np:, -self.Np:] = self.F_global_right[-self.Np:, -self.Np:] + self.H
+        self.F_global_right[-self.Np:, -self.Np:] = self.F_global_right[-self.Np:, -self.Np:] - self.E
+
+        self.F_global_left = np.linalg.solve(self.M_global,self.F_global_left)
+        self.F_global_right = np.linalg.solve(self.M_global,self.F_global_right)
+        '''
+        e1 = np.zeros(self.Np*self.K)
+        e1[0] = 1
+        eNpK = np.zeros(self.Np*self.K)
+        eNpK[-1] = 1
+
+        self.I_left_global = np.linalg.solve(self.M_global,e1)
+        self.I_right_global = np.linalg.solve(self.M_global,eNpK)
+
         self.Nv, self.VX, self.K, self.EtoV = MeshGen1D(self.xmin, self.xmax, self.K)
 
         self.va = np.transpose(self.EtoV[:, 0])
@@ -328,6 +393,79 @@ class DG_1D:
 
         return ulimit
 
+    def Filter1D(self,N,Nc,s):
+
+
+        filterdiag = np.ones((N+1))
+
+        alpha = -np.log(np.finfo(float).eps)
+
+
+        for i in range(Nc,N):
+            #filterdiag[i+1] = np.exp(-alpha*((i-Nc)/(N-Nc))**s)
+            filterdiag[i+1] = np.exp(-alpha*((i-1)/N)**s)
+
+
+        F = np.dot(self.V,np.dot(np.diag(filterdiag),self.invV))
+        return F
+
+    def FindElement(self,x):
+
+        diff = x-self.VX
+        element = np.argwhere(diff >= 0)[-1,0]
+
+        return element
+
+    def EvaluateSol(self,x,sol_nodal):
+
+        sol_modal = np.dot(self.invV, sol_nodal)
+
+        if x == self.VX:
+
+            i_interface = np.argwhere(x == self.VX)
+
+            sol_xVec = []
+            for i in range(len(x)):
+                if x[i] == self.xmin:
+                    sol_x = sol_nodal[0,0]
+                elif x[i] == self.xmax:
+                    sol_x = sol_nodal[-1, -1]
+                elif i == i_interface and i != 0 and i != len(x)-1:
+                    sol_x = 0.5*(sol_nodal[i-1,-1]+sol_nodal[i,0])
+                else:
+                    element = self.FindElement(x[i])
+
+                    x_ref = 2 * (x[i] - self.VX[element]) / self.deltax - 1
+
+                    sol_x = 0
+                    for j in range(self.Np):
+                        P = JacobiP(np.array([x_ref]), 0, 0, j)
+                        sol_x += sol_modal[j, element] * P[0, 0]
+
+                sol_xVec.append(sol_x)
+
+        else:
+
+            sol_xVec = []
+            for i in range(len(x)):
+                if x[i] == self.xmin:
+                    sol_x = sol_nodal[0, 0]
+                elif x[i] == self.xmax:
+                    sol_x = sol_nodal[-1, -1]
+                else:
+                    element = self.FindElement(x[i])
+
+                    x_ref = 2*(x[i]-self.VX[element])/self.deltax-1
+
+                    sol_x = 0
+                    for j in range(self.Np):
+                        P = JacobiP(np.array([x_ref]), 0, 0, j)
+                        sol_x += sol_modal[j,element]*P[0,0]
+
+                sol_xVec.append(sol_x)
+
+        return sol_xVec
+
 
 class BDF2(DG_1D):
     def __init__(self, f, u0, t0, te, stepsize=1e-5,xmin=0, xmax=1, K=10, N=2):
@@ -435,12 +573,12 @@ class BDF2(DG_1D):
         return tVec, np.asarray(self.sol)
 
 class Pipe1D(DG_1D):
-    def __init__(self, xmin=0,xmax=1,K=10,N=5,c=1400,rho0=1000,p0=1e5, diameter=0.5):
+    def __init__(self, xmin=0,xmax=1,K=10,N=5,c=1400,rho0=1000,p0=1e5, diameter=0.5,poly='legendre'):
         self.xmin = xmin
         self.xmax = xmax
         self.K=K
         self.N = N
-        DG_1D.__init__(self, xmin=xmin,xmax=xmax,K=K,N=N)
+        DG_1D.__init__(self, xmin=xmin,xmax=xmax,K=K,N=N,poly=poly)
         self.c = c
         self.rho0 = rho0
         self.p0 = p0
@@ -534,72 +672,42 @@ class Pipe1D(DG_1D):
         q1 = q[0:int(len(q)/2)]
         q2 = q[-int(len(q)/2):]
 
-        u = np.divide(q2, q1)
-
         pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
-
-        self.f_l = self.f_leak(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
-
-        cvel = self.c
-        lm = np.abs(np.divide(q2, q1)) + cvel
 
         q1Flux = q2
         q2Flux = np.divide(np.power(q2, 2), q1) + pressure * self.A
 
-        dq1 = q1[self.vmapM] - q1[self.vmapP]
-        dq2 = q2[self.vmapM] - q2[self.vmapP]
-
-        dq1Flux = q1Flux[self.vmapM] - q1Flux[self.vmapP]
-        dq2Flux = q2Flux[self.vmapM] - q2Flux[self.vmapP]
+        cvel = self.c / np.sqrt(self.A)
+        lm = np.abs(np.divide(q2, q1)) + cvel
 
         LFc = np.maximum((lm[self.vmapM]), (lm[self.vmapP]))
 
-        dq1Flux = self.nx.flatten('F') * dq1Flux / 2. - LFc / 2. * dq1
-        dq2Flux = self.nx.flatten('F') * dq2Flux / 2. - LFc / 2. * dq2
-
-        if time >= self.tl[0,0] and time <= 200:
-            self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
-            self.pOut = -self.initOutPres*0.7/180*time + self.initOutPres*(1+0.7/180*20)
-
         q1in, q1out, q2in, q2out, pin, pout = self.BoundaryConditions(q1,q2)
 
+        #BCq1 = np.zeros(self.Np*self.K)
+        #BCq2 = np.zeros(self.Np*self.K)
+        #BCq1[-1] = 0.5*q2out - np.max(np.abs(LFc))/2*q1out
+        #BCq2[0] = - 0.5*np.divide(np.power(q2in, 2), q1in) + pout * self.A - np.max(np.abs(LFc))/2*q2out
 
-        nx = self.nx.flatten('F')
+        #self.f_l = self.f_leak(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
 
-        q1FluxIn = q2in
-        q2FluxIn = np.divide(np.power(q2in, 2), q1in) + pin * self.A
+        u = np.divide(q2, q1)
+        #Red = q1 * self.diameter * np.abs(u) / self.A / self.mu
+        #f_friction = 0.25 * 1 / ((-1.8 * np.log10((self.epsFriction / self.diameter / 3.7) ** 1.11 + 6.9 / Red)) ** 2)
+        #friction_term = 0.5 * self.diameter * np.pi * f_friction * q1 / self.A * u * u
+        #friction_term = np.reshape(friction_term, (self.N + 1, self.K), 'F')
+        #pdb.set_trace()
+        rhsq1 = -np.dot(self.D_global,q1Flux) - np.max(np.abs(LFc))/2*np.dot(self.F_global,q1)# - np.linalg.solve(self.M_global,(self.rx*self.f_l).flatten('F'))# - BCq1
+        rhsq2 = -np.dot(self.D_global,q2Flux) - np.max(np.abs(LFc))/2*np.dot(self.F_global,q2)# - np.linalg.solve(self.M_global,friction_term.flatten('F'))# - BCq2
 
-        lmIn = lm[self.vmapI] / 2
-        nxIn = nx[self.mapI]
+        #if time >= self.tl[0,0] and time <= 200:
+        #    self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
+        #    self.pOut = -self.initOutPres*0.7/180*time + self.initOutPres*(1+0.7/180*20)
 
-        dq1Flux[self.mapI] = np.dot(nxIn, q1Flux[self.vmapI] - q1FluxIn) / 2 - np.dot(lmIn, q1[self.vmapI] - q1in)
-        dq2Flux[self.mapI] = np.dot(nxIn, q2Flux[self.vmapI] - q2FluxIn) / 2 - np.dot(lmIn, q2[self.vmapI] - q2in)
+        #q1in, q1out, q2in, q2out, pin, pout = self.BoundaryConditions(q1,q2)
+        #rhsq1 = -np.dot(self.D_global_right,q1Flux) - np.max(LFc)/2*np.dot(self.F_global_right,q1) #- q1in*self.I_right_global
+        #rhsq2 = -np.dot(self.D_global_left,q2Flux) - np.max(LFc)/2*np.dot(self.F_global_left,q2) #+ q2in*self.I_left_global
 
-        q1FluxOut = q2out
-        q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout * self.A
-
-        lmOut = lm[self.vmapO] / 2
-        nxOut = nx[self.mapO]
-
-        dq1Flux[self.mapO] = np.dot(nxOut, q1Flux[self.vmapO] - q1FluxOut) / 2 - np.dot(lmOut, q1[self.vmapO] - q1out)
-        dq2Flux[self.mapO] = np.dot(nxOut, q2Flux[self.vmapO] - q2FluxOut) / 2 - np.dot(lmOut, q2[self.vmapO] - q2out)
-
-        q1Flux = np.reshape(q1Flux, (self.Np, self.K), 'F')
-        q2Flux = np.reshape(q2Flux, (self.Np, self.K), 'F')
-
-        dq1Flux = np.reshape(dq1Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
-        dq2Flux = np.reshape(dq2Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
-
-        Red = q1 * self.diameter * np.abs(u) / self.A / self.mu
-        f_friction = 0.25*1/((-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2)
-        friction_term = 0.5*self.diameter*np.pi*f_friction*q1/self.A*u*u
-        friction_term = np.reshape(friction_term,(self.N+1,self.K),'F')
-
-        rhsq1 = (-self.rx * np.dot(self.Dr, q1Flux) + np.dot(self.LIFT, self.Fscale * dq1Flux)) - self.rx * self.f_l
-        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux)) - friction_term
-
-        rhsq1 = rhsq1.flatten('F')
-        rhsq2 = rhsq2.flatten('F')
 
         return np.concatenate((rhsq1,rhsq2),axis=0)
 
@@ -610,7 +718,7 @@ class Pipe1D(DG_1D):
 
         mindeltax = self.x[1,0]-self.x[0,0]#self.deltax
 
-        CFL = .1
+        CFL = .8
 
         solq1 = [q1]
         solq2 = [q2]
@@ -623,13 +731,13 @@ class Pipe1D(DG_1D):
         i = 0
 
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
-
         while time < FinalTime:
 
             u = np.divide(q2, q1)
-            lam = np.max(np.abs(np.concatenate((u + self.c, u - self.c))))
+            lam = np.max(np.abs(np.concatenate((u + self.c/np.sqrt(self.A), u - self.c/np.sqrt(self.A)))))
             C = np.max(lam)
             dt = CFL * mindeltax / C
+
             '''
             for INTRK in range(0, 5):
                 rhsq = self.PipeRHS1D(time, q)
@@ -645,6 +753,7 @@ class Pipe1D(DG_1D):
 
                 q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
             '''
+
             rhs = self.PipeRHS1D(time,q)
             rhsq1,rhsq2 = rhs[0:int(m)],rhs[-int(m):]
             rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
@@ -672,8 +781,13 @@ class Pipe1D(DG_1D):
             q2 = DG_1D.SlopeLimitN(self, q2)
             q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
+            F = self.Filter1D(self.N,1,2)
+            q1 = np.dot(F,q1)
+            q2 = np.dot(F,q2)
+
             solq1.append(q1.flatten('F'))
             solq2.append(q2.flatten('F'))
+
 
             time = time + dt
             tVec.append(time)
@@ -682,18 +796,15 @@ class Pipe1D(DG_1D):
             if i % 100 == 0:
                 print(str(int(time/self.FinalTime*100)) + '% Done' )
 
+
         return solq1, solq2, tVec
 
     def ImplicitIntegration(self, q1, q2):
 
         initCondition = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
-        #system = SDIRK(self.PipeRHS1DImplicit, initCondition, t0=0, te=self.FinalTime,order=1, stepsize=self.stepsize, xmin=self.xmin,xmax=self.xmax, K=self.K, N=self.N)
         system = BDF2(self.PipeRHS1D, initCondition, t0=0, te=self.FinalTime, stepsize=self.stepsize,xmin=self.xmin, xmax=self.xmax, K=self.K, N=self.N)
         t_vec, solution = system.solve()
-
-        #solution = integrate.solve_ivp(self.PipeRHS1DImplicit, [0, self.FinalTime], initCondition,method='RK45')
-        #return np.transpose(solution.y[0:int(solution.y.shape[0] / 2),:]), np.transpose(solution.y[-int(solution.y.shape[0] / 2):,:]), solution.t
 
         return solution[:,0:int(solution.shape[1] / 2)], solution[:,-int(solution.shape[1] / 2):], t_vec
 
@@ -714,9 +825,12 @@ class Pipe1D(DG_1D):
         self.pOut = initOutPres
 
 
-        q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
-        q1,q2 = self.SteadyStateSolve(q)
+        q = np.concatenate((q1, q2), axis=0)
+        #q1,q2 = self.SteadyStateSolve(q)
+        q1 = q[0:int(len(q) / 2)]
+        q2 = q[-int(len(q) / 2):]
 
+        '''
 
         benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',', dtype=np.float64)
         ben_xu = benjamin_u[:, 0]
@@ -749,7 +863,6 @@ class Pipe1D(DG_1D):
 
 
 
-        '''
         benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',',dtype=np.float64)
         ben_xu = benjamin_u[:, 0]
         ben_u = benjamin_u[:, 1]

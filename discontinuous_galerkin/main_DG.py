@@ -1,10 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pdb
-import DG_routines as DG
+import pipe_flow
+
 import matplotlib.animation as animation
 import scipy.integrate as int
 import scipy.special as spec
+
+
 
 # animation function.  This is called sequentially
 def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
@@ -36,12 +39,14 @@ def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
 
     # save the animation as mp4 video file
     anim.save(gif_name + '.mp4',writer=writer)
-#plt.figure()
+plt.figure()
 solsu = []
 solsrhoa = []
 solsp = []
-for N in [3]:
-    #N = 2
+poly = 'legendre'
+integrator = True
+for xl in [500]:
+    N = 2
     K = 100
 
     xmin = 0.
@@ -54,7 +59,8 @@ for N in [3]:
 
     diameter = 0.508
 
-    DG_model_pipe = DG.Pipe1D(xmin=xmin,xmax=xmax,K=K,N=N,c=c,rho0=rho0,p0=p0, diameter=diameter)
+    DG_model_pipe = pipe_flow.Pipe1D(xmin=xmin,xmax=xmax,K=K,N=N,c=c,rho0=rho0,p0=p0,
+                              diameter=diameter,poly=poly)
     DG_model_pipe.StartUp()
 
     xVec = np.reshape(DG_model_pipe.x, (N + 1) * K, 'F')
@@ -66,17 +72,19 @@ for N in [3]:
     initInflow = 2.
     initOutPres = 5e5
 
-    FinalTime = 300.
+    FinalTime = 300#0.142857142857143
 
-    #mu1 = xmax/2
-    #sigma = .5
+    mu1 = xmax/2
+    sigma = 1
     #q1init =  100 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2)) + rho0
     #q1init *= DG_model_pipe.A
-    pinit = initOutPres*np.ones(DG_model_pipe.x.shape)
+    pinit = p0*np.ones(DG_model_pipe.x.shape)
     q1init = ((pinit - DG_model_pipe.p0) / (DG_model_pipe.c ** 2) + DG_model_pipe.rho0) * DG_model_pipe.A#rho0*np.ones((N+1,K))*DG_model_pipe.A
     q2init = initInflow*np.ones((N+1,K))*q1init
+    #q2init = 1 +  1 / (sigma * np.sqrt(2 * np.pi)) * np.exp(-0.5 * np.power((DG_model_pipe.x - mu1) / sigma, 2))
+    #q2init = q2init * q1init
 
-    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=False,stepsize=1e0,
+    solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=integrator,stepsize=2e0,
                                             xl=xl,tl=tl,leak_type='discharge',Cv=Cv,pamb=pamb,mu=mu,initInflow=initInflow,initOutPres=initOutPres)
     #%%
     rhoA = []
@@ -91,6 +99,7 @@ for N in [3]:
         p.append(np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
         pBar.append(1e-5*np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
 
+
     solsu.append(u)
     solsrhoa.append(rhoA)
     solsp.append(p)
@@ -101,14 +110,13 @@ for N in [3]:
         initial_total_mass += int.simps(np.reshape(solq1[0],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         end_total_mass += int.simps(np.reshape(solq1[-1],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
 
-    '''
     total_mass = []
     for t in range(len(time)):
         mass = 0
         for i in range(K):
             mass += int.simps(np.reshape(solq1[t],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         total_mass.append(mass)
-    '''
+    
     leaked_mass = []
     for t in range(len(time)):
         leak = DG_model_pipe.f_leak(time[t],DG_model_pipe.xElementL,tl,pressure=p[t],rho=rho[t])
@@ -121,33 +129,87 @@ for N in [3]:
 
     pressure_leak = []
     for t in range(len(time)):
-        mean_pressure = np.mean(np.reshape(pBar[t], (DG_model_pipe.Np, DG_model_pipe.K), 'F')[:, DG_model_pipe.xElementL])
+        mean_pressure = np.mean(np.reshape(p[t], (DG_model_pipe.Np, DG_model_pipe.K), 'F')[:, DG_model_pipe.xElementL])
         pressure_leak.append(mean_pressure)
 
     #print('Initial total mass: ' + str(initial_total_mass))
     #print('End total mass: ' + str(end_total_mass))
     #print('Mass difference: ' + str(initial_total_mass-end_total_mass))
+    u_mat = np.asarray(u)
+    p_mat = np.asarray(p)
 
-    xVec = DG_model_pipe.x.flatten('F')
-    #plt.plot(xVec, u[-1],label=str(K))
+    #xVec = DG_model_pipe.x.flatten('F')
+    #plt.plot(time, u_mat[10,:],label='Leakage = ' + str(xl))
 #plt.grid(True)
 #plt.legend()
 #plt.show()
+plt.figure()
+#plt.plot(xVec,u[0],linewidth=2,label='u')
+#plt.plot(xVec,u[0],linewidth=2,label='rhoA init')
+plt.plot(xVec,u[-1],linewidth=2,label='rhoA end')
+#plt.plot(xVec,q1init.flatten('F'),linewidth=2,label='true init')
+plt.grid(True)
+plt.legend()
+plt.title('Velocity at End')
+plt.xlabel('Time (s)')
+plt.ylabel('Velocity')
+plt.show()
 
+animateSolution(xVec,time[0:-1],p[0:-1])
+
+'''
+p_mat = np.asarray(p)
+
+xVec_no_repeat = np.delete(xVec,range(N,(N+1)*K,N+1))
+
+pp = []
+for i in range(len(p)):
+    p_new = p[i]
+    #p_new =
+
+
+
+[X,Y] = np.meshgrid(DG_model_pipe.x.flatten('F'),time)
+
+p_mat = np.asarray(p)
+plt.figure()
+plt.contourf(X,Y,p_mat,levels=10)
+plt.contour(X,Y,p_mat,levels=10,colors='black')
+plt.xlabel('s [m]')
+plt.ylabel('t [s]')
+plt.title('Pressure')
+plt.savefig('pressure_contour')
+#plt.show()
+
+u_mat = np.asarray(u)
+plt.figure()
+plt.contourf(X,Y,u_mat,levels=10)
+plt.contour(X,Y,u_mat,levels=10,colors='black')
+plt.xlabel('s [m]')
+plt.ylabel('t [s]')
+plt.title('Velocity')
+plt.savefig('velocity_contour')
+#plt.show()
+
+'''
 benjamin_data = np.genfromtxt('benjamin_data.csv',delimiter=',')
 benjamin_time = benjamin_data[:,0]
 benjamin_mass_leak = benjamin_data[:,1]
 
+benjamin_data = np.genfromtxt('p_leak_N400_dt1.csv',delimiter=',')
+benjamin_pressure_time = benjamin_data[:,0]
+benjamin_pressure_leak = benjamin_data[:,1]
+
 plt.figure()
-plt.plot(time,pressure_leak,linewidth=2,label='Pressure at Leak point')
-plt.vlines(20,ymin=0,ymax=np.max(pressure_leak)+2,colors='red',label='Leak start')
-plt.ylim([np.min(pressure_leak)-1,np.max(pressure_leak)+1])
+plt.plot(time,pressure_leak,linewidth=2,label='Nikolaj')
+plt.plot(benjamin_pressure_time,benjamin_pressure_leak,linewidth=2,label='Benjamin')
 plt.grid(True)
 plt.legend()
+plt.title('Pressure at Leak')
 plt.xlabel('Time (s)')
 plt.ylabel('Pressure (bar)')
 plt.savefig('pressure_at_leak')
-plt.show()
+#plt.show()
 
 plt.figure()
 plt.plot(time,leaked_mass,label='DG',linewidth=2)
@@ -157,6 +219,15 @@ plt.legend()
 plt.xlabel('Time (s)')
 plt.ylabel('Mass Flow Through Leak (kg/s)')
 plt.savefig('leaked_mass')
+#plt.show()
+
+plt.figure()
+plt.plot(xVec,u[-1],linewidth=2,label='Nikolaj')
+plt.grid(True)
+plt.legend()
+plt.title('Velocity at End')
+plt.xlabel('Time (s)')
+plt.ylabel('Velocity')
 plt.show()
 
 '''
@@ -187,5 +258,5 @@ plt.show()
 '''
 
 #%%
-animateSolution(xVec,time[0:-1:50],pBar[0:-1:50])
+#animateSolution(xVec,time[0:-1],pBar[0:-1])
 
