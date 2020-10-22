@@ -1,18 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pdb
-from scipy.special import gamma
-import scipy.special as sci
-import scipy.sparse as sps
-import scipy.integrate as integrate
 import time as timing
-import scipy.linalg as scilin
 import discontinuous_galerkin_global as DG
 import time_integrators as time_int
 
-import scipy.optimize as opt
-import scipy.sparse.linalg as spla
-import scipy.integrate as integrate
+from scipy.sparse import csr_matrix
 
 
 
@@ -144,6 +137,7 @@ class Pipe1D(DG.DG_1D):
         pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
 
         self.f_l = self.Leakage(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
+        friction_term = self.Friction(q1,q2,u)
 
         cvel = self.c/np.sqrt(self.A)
         lm = np.abs(u) + cvel
@@ -151,7 +145,9 @@ class Pipe1D(DG.DG_1D):
         q1Flux = q2
         q2Flux = np.divide(np.power(q2, 2), q1) + pressure * self.A
 
-        LFc = np.maximum((lm[self.vmapM]), (lm[self.vmapP]))
+
+        LFc = np.ones((self.Np*self.K))
+        LFc[self.edgesIdx] = np.max(np.maximum((lm[self.vmapM]), (lm[self.vmapP])))
 
         if time >= self.tl[0,0] and time <= 200:
             self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
@@ -159,20 +155,21 @@ class Pipe1D(DG.DG_1D):
 
         q1in, q1out, q2in, q2out, pin, pout = self.BoundaryConditions(q1,q2,time)
 
-        nx = self.nx.flatten('F')
-
         q1FluxIn = q2in
         q2FluxIn = np.divide(np.power(q2in, 2), q1in) + pin * self.A
 
-        lmIn = lm[self.vmapI] / 2
-        nxIn = nx[self.mapI]
-
-        lmOut = lm[self.vmapO] / 2
-        nxOut = nx[self.mapO]
+        q1FluxOut = q2out
+        q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout * self.A
 
 
-        friction_term = self.Friction(q1,q2,u)
+        #rhsq1 = -np.dot(self.S_global,q1Flux)-np.dot(self.G_global,q1Flux)-LFc/2*np.dot(self.F_global,q1) - np.dot(self.invM_global,self.f_l.flatten('F'))
+        #rhsq2 = -np.dot(self.S_global, q2Flux) - np.dot(self.G_global, q2Flux) - LFc / 2 * np.dot(self.F_global,q2)-friction_term
+        rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(self.f_l.flatten('F'))
+        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - LFc / 2 *self.F_global.dot(q2)  - friction_term
 
+
+        rhsq1 += q1FluxIn*self.e1BC - q1FluxOut*self.eNpKBC + LFc*(q1in*self.e1BC+q1out*self.eNpKBC)
+        rhsq2 += q2FluxIn*self.e1BC - q2FluxOut*self.eNpKBC + LFc *(q2in*self.e1BC+q2out*self.eNpKBC)
 
         return np.concatenate((rhsq1,rhsq2),axis=0)
 
@@ -276,28 +273,103 @@ class Pipe1D(DG.DG_1D):
 
         return solution[:,0:int(solution.shape[1] / 2)], solution[:,-int(solution.shape[1] / 2):], t_vec
 
-    def BoundaryConditions(self):
+    def GlobalBoundaryConditionMatrices(self,inflow = [1,1],outflow = [1,1]):
+
+        I = np.eye(self.K)
+        subdiag = np.eye(self.K, k=-1)
+        supdiag = np.eye(self.K, k=1)
+
+
+        self.e1BC = np.zeros(self.Np * self.K)
+        self.e1BC[0] = 1
+        self.e1BC = np.dot(self.invM_global, self.e1BC)
+
+        self.eNpKBC = np.zeros(self.Np * self.K)
+        self.eNpKBC[-1] = 1
+        self.eNpKBC = np.dot(self.invM_global, self.eNpKBC)
+
+
+        self.G_global = np.kron(subdiag, -0.5 * self.F) + np.kron(I, 0.5 * (self.E - self.H)) + np.kron(supdiag, 0.5 * self.G)
+        self.F_global = np.kron(subdiag, -self.F) + np.kron(I, self.H + self.E) + np.kron(supdiag, -self.G)
 
         self.G_global[0: self.Np, 0: self.Np] += 0.5 * self.E
-        self.G_global[-self.Np:, -self.Np:] -= 0.5 * self.H
-
         self.F_global[0: self.Np, 0: self.Np] += self.E
+
+        self.G_global[-self.Np:, -self.Np:] -= 0.5 * self.H
         self.F_global[-self.Np:, -self.Np:] += self.H
 
         self.G_global = np.dot(self.invM_global, self.G_global)
         self.F_global = np.dot(self.invM_global, self.F_global)
 
-        eps = 0.000001 * np.pi
-        self.bcLeft = 0  # -np.tanh((-1+0.5)/eps) + 1
-        self.bcRight = 0  # -np.tanh((1 + 0.5) /eps) + 1
+        self.invM_global = csr_matrix(self.invM_global)
+        self.S_global = csr_matrix(self.S_global)
+        self.G_global = csr_matrix(self.G_global)
+        self.F_global = csr_matrix(self.F_global)
 
-        self.e1 = np.zeros(self.Np * self.K)
-        self.e1[0] = 1
-        self.e1BC = np.dot(self.invM_global, self.e1)
+        '''
+        self.G_global_u = np.kron(subdiag, -0.5 * self.F) + np.kron(I, 0.5 * (self.E - self.H)) + np.kron(supdiag,
+                                                                                                          0.5 * self.G)
+        self.G_global_rho = np.kron(subdiag, -0.5 * self.F) + np.kron(I, 0.5 * (self.E - self.H)) + np.kron(supdiag, 0.5 * self.G)
 
-        self.eNpK = np.zeros(self.Np * self.K)
-        self.eNpK[-1] = 1
-        self.eNpKBC = self.bcRight * np.dot(self.invM_global, self.eNpK)
+
+        self.F_global_u = np.kron(subdiag, -self.F) + np.kron(I, self.H + self.E) + np.kron(supdiag, -self.G)
+
+        self.F_global_rho = np.kron(subdiag, -self.F) + np.kron(I, self.H + self.E) + np.kron(supdiag, -self.G)
+
+        if inflow[0] == 1:
+            self.G_global_u[0: self.Np, 0: self.Np] += 0.5 * self.E
+            self.F_global_u[0: self.Np, 0: self.Np] += self.E
+            self.e1_u = np.zeros(self.Np * self.K)
+            self.e1_u[0] = 1
+            self.e1BC_u = np.dot(self.invM_global, self.e1_u)
+        else:
+            self.G_global_u[0: self.Np, 0: self.Np] -= 0.5 * self.E
+            self.F_global_u[0: self.Np, 0: self.Np] -= self.E
+            self.e1BC_u = np.zeros(self.Np * self.K)
+
+        if outflow[0] == 1:
+            self.G_global_u[-self.Np:, -self.Np:] -= 0.5 * self.H
+            self.F_global_u[-self.Np:, -self.Np:] += self.H
+            self.eNpK_u = np.zeros(self.Np * self.K)
+            self.eNpK_u[-1] = 1
+            self.eNpKBC_u = np.dot(self.invM_global, self.eNpK_u)
+        else:
+            self.G_global_u[-self.Np:, -self.Np:] += 0.5 * self.H
+            self.F_global_u[-self.Np:, -self.Np:] -= self.H
+            self.eNpKBC_u = np.zeros(self.Np * self.K)
+
+
+        if inflow[1] == 1:
+            self.G_global_rho[0: self.Np, 0: self.Np] += 0.5 * self.E
+            self.F_global_rho[0: self.Np, 0: self.Np] += self.E
+            self.e1_rho = np.zeros(self.Np * self.K)
+            self.e1_rho[0] = 1
+            self.e1BC_rho = np.dot(self.invM_global, self.e1_rho)
+        else:
+            self.G_global_rho[0: self.Np, 0: self.Np] -= 0.5 * self.E
+            self.F_global_rho[0: self.Np, 0: self.Np] -= self.E
+            self.e1BC_rho = np.zeros(self.Np * self.K)
+
+        if outflow[1] == 1:
+            self.G_global_rho[-self.Np:, -self.Np:] -= 0.5 * self.H
+            self.F_global_rho[-self.Np:, -self.Np:] += self.H
+            self.eNpK_rho = np.zeros(self.Np * self.K)
+            self.eNpK_rho[-1] = 1
+            self.eNpKBC_rho = np.dot(self.invM_global, self.eNpK_rho)
+        else:
+            self.G_global_rho[-self.Np:, -self.Np:] += 0.5 * self.H
+            self.F_global_rho[-self.Np:, -self.Np:] -= self.H
+            self.eNpKBC_rho = np.zeros(self.Np * self.K)
+
+
+
+        self.G_global_u = np.dot(self.invM_global, self.G_global_u)
+        self.F_global_u = np.dot(self.invM_global, self.F_global_u)
+
+        self.G_global_rho = np.dot(self.invM_global, self.G_global_rho)
+        self.F_global_rho = np.dot(self.invM_global, self.F_global_rho)
+        '''
+
 
     def solve(self, q1,q2, FinalTime,implicit=False,stepsize=1e-5,xl=0,tl=0,
               leak_type='mass',Cv=1,pamb=1e5,mu=1.,initInflow=2,initOutPres=5e5):
@@ -315,8 +387,9 @@ class Pipe1D(DG.DG_1D):
         self.initOutPres = initOutPres
         self.uIn = initInflow
         self.pOut = initOutPres
+        self.edgesIdx = np.unique(np.concatenate((self.vmapM,self.vmapP)))
 
-        self.BoundaryConditions()
+        self.GlobalBoundaryConditionMatrices()
 
 
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
@@ -324,37 +397,6 @@ class Pipe1D(DG.DG_1D):
         #q1 = q[0:int(len(q) / 2)]
         #q2 = q[-int(len(q) / 2):]
 
-
-
-        ''''''
-        benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',', dtype=np.float64)
-        ben_xu = benjamin_u[:, 0]
-        ben_u = benjamin_u[:, 1]
-
-        benjamin_p = np.genfromtxt('p_initial.csv', delimiter=',')
-        ben_xp = benjamin_p[:, 0]
-        ben_p = benjamin_p[:, 1]
-
-        plt.figure()
-        plt.plot(self.x.flatten('F'), np.divide(q2, q1), linewidth=2, label='Nikolaj')
-        plt.plot(ben_xu, ben_u, linewidth=2, label='Benjamin')
-        plt.xlabel('Position')
-        plt.legend()
-        plt.grid()
-        plt.title('Velocity')
-        plt.savefig('velocity_comparison')
-        plt.show()
-
-        pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
-        plt.figure()
-        plt.plot(self.x.flatten('F'), pressure, linewidth=2, label='Nikolaj')
-        plt.plot(ben_xp, ben_p, linewidth=2, label='Benjamin')
-        plt.xlabel('Position')
-        plt.legend()
-        plt.grid()
-        plt.title('Pressure')
-        plt.savefig('pressure_comparison')
-        plt.show()
 
 
 
@@ -368,7 +410,7 @@ class Pipe1D(DG.DG_1D):
 
         plt.figure()
         plt.plot(self.x.flatten('F'),np.divide(q2,q1),linewidth=2,label='Nikolaj')
-        plt.plot(ben_xu,ben_u,linewidth=2,label='Benjamin')
+        plt.plot(ben_xu,ben_u,'--',linewidth=2,label='Benjamin')
         plt.xlabel('Position')
         plt.legend()
         plt.grid()
@@ -379,7 +421,7 @@ class Pipe1D(DG.DG_1D):
         pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
         plt.figure()
         plt.plot(self.x.flatten('F'), pressure,linewidth=2, label='Nikolaj')
-        plt.plot(ben_xp, ben_p,linewidth=2, label='Benjamin')
+        plt.plot(ben_xp, ben_p,'--',linewidth=2, label='Benjamin')
         plt.xlabel('Position')
         plt.legend()
         plt.grid()

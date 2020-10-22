@@ -13,6 +13,7 @@ import scipy.sparse.linalg as spla
 import scipy.integrate as integrate
 
 
+
 def JacobiP(x,alpha,beta,N):
     xp = x
 
@@ -143,21 +144,21 @@ class DG_1D:
             alpha = -0.5
             beta = -0.5
 
-        self.r = JacobiGL(alpha, beta, self.N)
-        self.V = Vandermonde1D(self.r, alpha, beta, self.N)
+        self.r = JacobiGL(alpha,beta,self.N)
+        self.V = Vandermonde1D(self.r,alpha,beta,self.N)
         self.invV = np.linalg.inv(self.V)
-        self.Dr = Dmatrix1D(self.r, alpha, beta, self.N, self.V)
-        self.invM = np.dot(self.V, np.transpose(self.V))  # np.linalg.inv(self.M)
+        self.Dr = Dmatrix1D(self.r,alpha,beta,self.N,self.V)
+        self.invM = np.dot(self.V,np.transpose(self.V))#np.linalg.inv(self.M)
         self.M = np.linalg.inv(self.invM)
         self.S = np.dot(self.M, self.Dr)
-        self.E = np.zeros((self.Np, self.Np))
-        self.E[0, 0] = 1
-        self.F = np.zeros((self.Np, self.Np))
-        self.F[0, -1] = 1
-        self.G = np.zeros((self.Np, self.Np))
-        self.G[-1, 0] = 1
-        self.H = np.zeros((self.Np, self.Np))
-        self.H[-1, -1] = 1
+        E = np.zeros((self.Np, self.Np))
+        E[0, 0] = 1
+        F = np.zeros((self.Np, self.Np))
+        F[0, -1] = 1
+        G = np.zeros((self.Np, self.Np))
+        G[-1, 0] = 1
+        H = np.zeros((self.Np, self.Np))
+        H[-1, -1] = 1
 
         self.Nv, self.VX, self.K, self.EtoV = MeshGen1D(self.xmin, self.xmax, self.K)
 
@@ -168,23 +169,78 @@ class DG_1D:
         self.deltax = np.min(np.abs(self.x[0, :] - self.x[-1, :]))
 
         I = np.eye(self.K)
-        subdiag = np.eye(self.K, k=-1)
-        supdiag = np.eye(self.K, k=1)
+        subdiag = np.eye(self.K,k=-1)
+        supdiag = np.eye(self.K,k=1)
 
-        invM = np.dot(self.V, np.transpose(self.V))
+        invM = np.dot(self.V,np.transpose(self.V))
         M = np.linalg.inv(invM)
-        invMk = 2 / self.deltax * invM
-        self.invM_global = np.kron(I, invMk)
+        invMk = 2/self.deltax*invM
+        self.invM_global = np.kron(I,invMk)
 
         Dx = self.Dr
-        S = np.dot(M, Dx)
+        S = np.dot(M,Dx)
         self.S_global = np.kron(I, S)
+        self.S_global = np.dot(self.invM_global,self.S_global)
 
-        self.S_global = np.dot(self.invM_global, self.S_global)
+        self.G_global = np.kron(subdiag , -0.5*F) + np.kron(I,0.5*(E-H)) + np.kron(supdiag ,0.5*G)
 
-        self.G_global = np.kron(subdiag, -0.5 * self.F) + np.kron(I, 0.5 * (self.E - self.H)) + np.kron(supdiag, 0.5 * self.G)
+        self.F_global = np.kron(subdiag, -F) + np.kron(I, H+E) + np.kron(supdiag, -G)
 
-        self.F_global = np.kron(subdiag, -self.F) + np.kron(I, self.H + self.E) + np.kron(supdiag, -self.G)
+        self.G_global[0: self.Np, 0: self.Np] += 0.5*E
+        self.G_global[-self.Np:, -self.Np:] -= 0.5*H
+
+        self.F_global[0: self.Np, 0: self.Np] += E
+        self.F_global[-self.Np:, -self.Np:] += H
+
+        self.G_global = np.dot(self.invM_global,self.G_global)
+        self.F_global = np.dot(self.invM_global,self.F_global)
+
+        eps = 0.000001*np.pi
+        self.bcLeft = 0#-np.tanh((-1+0.5)/eps) + 1
+        self.bcRight = 0#-np.tanh((1 + 0.5) /eps) + 1
+
+        self.e1 = np.zeros(self.Np*self.K)
+        self.e1[0] = 1
+        self.e1BC = self.bcLeft*np.dot(self.invM_global,self.e1)
+
+        self.eNpK = np.zeros(self.Np*self.K)
+        self.eNpK[-1] = 1
+        self.eNpKBC = self.bcRight*np.dot(self.invM_global,self.eNpK)
+
+
+        '''
+        self.G_global = np.kron(subdiag , -0.5*F) + np.kron(I,0.5*(E-H)) + np.kron(supdiag ,0.5*G)
+        self.S_global = np.kron(I,S)
+        self.F_global = np.kron(subdiag, -F) + np.kron(I, H+E) + np.kron(supdiag, -G)
+
+        self.G_global[0: self.Np, -self.Np:] = -0.5 * F
+        self.G_global[-self.Np:, 0: self.Np] = 0.5 * G
+
+        self.F_global[0: self.Np, -self.Np:] = -F
+        self.F_global[-self.Np:, 0: self.Np] = -G
+        '''
+        '''
+
+        self.M_global_inv = np.kron(I, 2/self.deltax*self.invM)
+        #self.M_global_inv = np.linalg.inv(self.M_global)
+        self.S_global = np.kron(I,self.S)
+        self.S_global =  np.dot(self.M_global_inv, self.S_global)
+
+        self.G_global =  0.5 * np.kron(I, self.E - self.H)
+        self.G_global = self.G_global + 0.5 * np.kron(np.eye(self.K, k=1), self.G) - 0.5 * np.kron(np.eye(self.K, k=-1),
+                                                                                                   self.F)
+        self.G_global[-self.Np:, 0:self.Np] = 0.5 * self.G
+        self.G_global[0:self.Np, -self.Np:] = -0.5 * self.F
+        self.G_global = np.dot(self.M_global_inv, self.G_global)
+
+        self.F_global = np.kron(I, self.H + self.E)
+        self.F_global = self.F_global - np.kron(np.eye(self.K, k=1), self.G) - np.kron(np.eye(self.K, k=-1), self.F)
+        self.F_global[-self.Np:, 0:self.Np] = -self.G
+        self.F_global[0:self.Np, -self.Np:] = -self.F
+        # self.F_global = np.linalg.solve(self.M_global, self.F_global)
+        self.F_global = np.dot(self.M_global_inv, self.F_global)
+        '''
+        self.LIFT = lift1D(self.Np,self.Nfaces,self.Nfp,self.V)
 
 
         fmask1 = np.where(np.abs(self.r + 1.) < self.NODETOL)[0]
@@ -192,7 +248,6 @@ class DG_1D:
 
         self.Fmask = np.concatenate((fmask1, fmask2), axis=0)
         self.Fx = self.x[self.Fmask, :]
-
 
     def Normals1D(self):
             nx = np.zeros((self.Nfp * self.Nfaces, self.K))
@@ -325,7 +380,8 @@ class DG_1D:
 
         ux = (2/hN) * np.dot(self.Dr,ul)
 
-        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
+        #ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
+        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmod(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0)))
 
         return ulimit
 
@@ -432,3 +488,258 @@ class DG_1D:
                 sol_xVec.append(sol_x)
 
         return sol_xVec
+
+
+class BDF2(DG_1D):
+    def __init__(self, f, u0, t0, te, stepsize=1e-5,xmin=0, xmax=1, K=10, N=2):
+
+        DG_1D.__init__(self, xmin=xmin, xmax=xmax, K=K, N=N)
+
+        self.f = f
+        self.u0 = u0.astype(float)
+        self.t0 = t0
+        self.te = te
+        self.deltat = stepsize
+        self.Ntime = int((te-t0)/stepsize)
+        self.m = len(u0)
+        self.time = 0
+        self.MaxNewtonIter = 50
+        self.newton_tol = 1e-6
+
+        self.alpha = np.array([1, -4/3, 1/3])
+        self.beta = 2/3
+
+    def ComputeJacobian(self,U):
+
+        J = np.zeros((self.m,self.m))
+
+        F = self.f(self.time,U)
+        for col in range(self.m):
+            pert = np.zeros(self.m)
+            pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(U[col]), 1)
+            pert[col] = pert_jac
+
+            Upert = U + pert
+
+            Fpert = self.f(self.time,Upert)
+
+            J[:,col] = (Fpert - F) / pert_jac
+
+        return J
+
+    def InitialStep(self):
+
+        self.J = self.ComputeJacobian(self.sol[-1])
+        J = self.J
+        LHS = 1/self.deltat*np.eye(self.m) - J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1/self.deltat*(U_old - self.sol[-1]) - self.f(self.time,U_old))
+
+            delta_U = np.linalg.solve(LHS,RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
+
+    def UpdateState(self):
+
+        J = self.J#self.ComputeJacobian(self.sol[-1])
+
+        LHS = 1 / self.deltat * np.eye(self.m) - self.beta*J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1 / self.deltat * (self.alpha[0]*U_old + self.alpha[1]*self.sol[-1]+ self.alpha[2]*self.sol[-2]) - self.beta*self.f(self.time, U_old))
+
+            delta_U = np.linalg.solve(LHS, RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
+
+    def solve(self):
+
+        self.sol = [self.u0]
+        tVec = [self.t0]
+        self.time = self.t0
+
+        self.Un = self.InitialStep()
+        self.Un = self.SlopeLimitN(np.reshape(self.Un,(self.N+1,self.K),'F')).flatten('F')
+        self.sol.append(self.Un)
+        self.time += self.deltat
+        tVec.append(self.time)
+
+        for i in range(self.Ntime - 1):
+            self.Un = self.UpdateState()
+            self.Un = self.SlopeLimitN(np.reshape(self.Un, (self.N + 1, self.K), 'F')).flatten('F')
+            self.time += self.deltat
+            tVec.append(self.time)
+            self.sol.append(self.Un)
+
+            if i % 2 == 0:
+                print(str(int(i/(self.Ntime - 1)*100)) + '% Done' )
+
+        return tVec, np.asarray(self.sol)
+
+class Burgers1D(DG_1D):
+    def __init__(self, xmin=0,xmax=1,K=10,N=5,poly='legendre'):
+        self.xmin = xmin
+        self.xmax = xmax
+        self.K=K
+        self.N = N
+        DG_1D.__init__(self, xmin=xmin,xmax=xmax,K=K,N=N,poly=poly)
+        self.L = xmax-xmin
+
+    def BoundaryConditions(self,q):
+        qin = q[self.vmapO]
+        qout = q[self.vmapI]
+        return qin, qout
+
+    def BurgersRHS1D(self,time,q):
+
+        nx = self.nx.flatten('F')
+
+        lm = q
+        LFc = np.abs(np.maximum((lm[self.vmapM]), (lm[self.vmapP])))
+
+        qFlux = 0.5*np.power(q,2)
+        dq = q[self.vmapM] - q[self.vmapP]
+
+        dqFlux = qFlux[self.vmapM] - qFlux[self.vmapP]
+        dqFlux = nx*dqFlux / 2. -  LFc / 2. * dq
+
+        qin, qout = self.BoundaryConditions(q)
+
+        qFluxIn = 0.5*np.power(qin,2)
+        lmIn = np.abs(lm[self.vmapI]) / 2
+        nxIn = nx[self.mapI]
+        dqFlux[self.mapI] = nxIn*(qFlux[self.vmapI] - qFluxIn) / 2 - lmIn*(q[self.vmapI] - qin)
+
+        qFluxOut = 0.5*np.power(qout,2)
+        lmOut = np.abs(lm[self.vmapO]) / 2
+        nxOut = nx[self.mapO]
+        dqFlux[self.mapO] = nxOut* (qFlux[self.vmapO] - qFluxOut) / 2 - lmOut*(q[self.vmapO] - qout)
+
+        qFlux = np.reshape(qFlux, (self.Np, self.K), 'F')
+
+        dqFlux = np.reshape(dqFlux, ((self.Nfp * self.Nfaces, self.K)), 'F')
+
+        rhsq = (-self.rx * np.dot(self.Dr, qFlux) + np.dot(self.LIFT, self.Fscale * dqFlux))
+        rhsq = rhsq.flatten('F')
+
+        return rhsq
+
+    def BurgersRHS1D_global(self,time,q):
+
+        lm = q
+        LFc = np.max(np.maximum((lm[self.vmapM]), (lm[self.vmapP])))
+        #LFc = np.max(np.abs(q))
+        #LFc = 1
+        qFlux = np.power(q,2)/2
+        #qFlux = q
+        #rhsq = -np.dot(self.S_global,qFlux)-np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)- 0.5*(-qFlux[0]+2*self.bcLeft-qFlux[0])*self.e1 - LFc*0.5*(+q[0]-2*self.bcLeft+q[0])*self.e1
+                # + LFc/2*self.e1BC
+        #rhsq = -np.dot(self.S_global,qFlux)-np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)+ np.dot(self.invM_global,self.bcLeft*self.e1) + np.dot(self.invM_global,LFc*self.bcLeft*self.e1)
+        rhsq = -np.dot(self.S_global,qFlux)-np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)+ self.e1BC + LFc*self.e1BC - self.eNpKBC + LFc*self.eNpKBC
+
+        #rhsq *= 1/self.deltax
+        #rhsq = (-self.rx * np.dot(self.Dr, qFlux) + np.dot(self.LIFT, self.Fscale * dqFlux))
+        #rhsq = -np.dot(np.dot(self.invM_global,self.G_global),qFlux)-LFc/2*np.dot(np.dot(self.invM_global,self.F_global),q)
+        #rhsq = -np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)
+        #rhsq = np.dot(self.invM_global,rhsq)
+        return rhsq
+
+    def ExplicitIntegration(self,q,FinalTime):
+
+        time = 0
+
+        mindeltax = self.x[-1,0]-self.x[0,0]#self.deltax
+
+        CFL = .5
+        q = q.flatten('F')
+        sol = [q]
+        tVec = [time]
+
+
+        resq = np.zeros((self.Np*self.K))
+
+        filterMat =self.Filter1D(self.N, Nc=1, s=100)
+
+
+        i = 0
+        while time < FinalTime:
+
+            lam = np.max(np.abs(q))
+            C = np.max(lam)
+            #C = 1
+            dt = CFL * mindeltax / C
+
+            for INTRK in range(0, 5):
+                rhsq = self.BurgersRHS1D_global(time, q)
+
+                resq = self.rk4a[INTRK] * resq + dt * rhsq
+
+                q = q + self.rk4b[INTRK] * resq
+
+                #q = np.dot(filterMat,np.reshape(q,(self.Np,self.K),'F'))
+                q = DG_1D.SlopeLimitN(self, np.reshape(q,(self.Np,self.K),'F'))
+
+                q = q.flatten('F')
+
+            sol.append(q)
+
+            time = time + dt
+            tVec.append(time)
+
+            i += 1
+            if i % 100 == 0:
+                print(str(int(time/self.FinalTime*100)) + '% Done' )
+
+        return sol, tVec
+
+    def ImplicitIntegration(self, q):
+
+        initCondition = q.flatten('F')
+
+        system = BDF2(self.BurgersRHS1D, initCondition, t0=0, te=self.FinalTime, stepsize=self.stepsize,xmin=self.xmin, xmax=self.xmax, K=self.K, N=self.N)
+        t_vec, solution = system.solve()
+
+        return solution[:,0:int(solution.shape[1] / 2)], t_vec
+
+    def solve(self, q, FinalTime,implicit=False,stepsize=1e-5):
+
+        self.FinalTime = FinalTime
+        self.stepsize = stepsize
+
+        #q = q.flatten('F')
+
+
+        #q = self.SlopeLimitN(np.reshape(q,(self.N+1,self.K),'F'))
+
+        t0 = timing.time()
+        if implicit:
+            solq, tVec = self.ImplicitIntegration(q)
+        else:
+            solq, tVec = self.ExplicitIntegration(q,FinalTime)
+        t1 = timing.time()
+
+        print('Simulation finished \nTime: {:.2f} seconds'.format(t1-t0))
+
+        return solq,tVec
+
+
+
+
+

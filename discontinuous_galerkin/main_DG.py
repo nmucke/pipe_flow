@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pdb
-import pipe_flow
+import pipe_flow_global as pipe_flow
 
 import matplotlib.animation as animation
 import scipy.integrate as int
@@ -46,7 +46,7 @@ solsp = []
 poly = 'legendre'
 integrator = True
 for xl in [500]:
-    N = 2
+    N = 3
     K = 100
 
     xmin = 0.
@@ -99,11 +99,13 @@ for xl in [500]:
         p.append(np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
         pBar.append(1e-5*np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
 
+    animateSolution(xVec, time[0:-1], p[0:-1])
 
     solsu.append(u)
     solsrhoa.append(rhoA)
     solsp.append(p)
 
+    '''
     initial_total_mass = 0
     end_total_mass = 0
     for i in range(K):
@@ -116,10 +118,10 @@ for xl in [500]:
         for i in range(K):
             mass += int.simps(np.reshape(solq1[t],(N+1,K),'F')[:,i],DG_model_pipe.x[:,i])
         total_mass.append(mass)
-    
+    '''
     leaked_mass = []
     for t in range(len(time)):
-        leak = DG_model_pipe.f_leak(time[t],DG_model_pipe.xElementL,tl,pressure=p[t],rho=rho[t])
+        leak = DG_model_pipe.Leakage(time[t],DG_model_pipe.xElementL,tl,pressure=p[t],rho=rho[t])
         #leak = DG_model_pipe.rx*leak
         #leak_element = 0
         #for i in range(K):
