@@ -115,5 +115,4 @@ class BDF2(DG.DG_1D):
 
             if i % 2 == 0:
                 print(str(int(i/(self.Ntime - 1)*100)) + '% Done' )
-
         return tVec, np.asarray(self.sol)

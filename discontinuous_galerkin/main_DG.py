@@ -9,6 +9,8 @@ import scipy.special as spec
 
 
 
+
+
 # animation function.  This is called sequentially
 def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
     fig = plt.figure()
@@ -47,7 +49,7 @@ poly = 'legendre'
 integrator = True
 for xl in [500]:
     N = 3
-    K = 100
+    K = 5
 
     xmin = 0.
     xmax = 5000.

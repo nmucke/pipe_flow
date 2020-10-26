@@ -301,10 +301,12 @@ class Pipe1D(DG.DG_1D):
         self.G_global = np.dot(self.invM_global, self.G_global)
         self.F_global = np.dot(self.invM_global, self.F_global)
 
+
         self.invM_global = csr_matrix(self.invM_global)
         self.S_global = csr_matrix(self.S_global)
         self.G_global = csr_matrix(self.G_global)
         self.F_global = csr_matrix(self.F_global)
+
 
         '''
         self.G_global_u = np.kron(subdiag, -0.5 * self.F) + np.kron(I, 0.5 * (self.E - self.H)) + np.kron(supdiag,
@@ -369,6 +371,21 @@ class Pipe1D(DG.DG_1D):
         self.G_global_rho = np.dot(self.invM_global, self.G_global_rho)
         self.F_global_rho = np.dot(self.invM_global, self.F_global_rho)
         '''
+
+    def fluxJacobian(self, q):
+
+        q1 = q[0:int(len(q) / 2)]
+        q2 = q[-int(len(q) / 2):]
+
+        dq1f1 = np.diag(0*q1)
+        dq2f1 = np.diag(q2/q2)
+
+        dq1f2 = np.diag(-q2*q2/q1/q1+self.c*self.c)
+        dq2f2 = np.diag(2*q2/q1)
+
+        J = np.array([[dq1f1,dq2f1],[dq1f2,dq2f2]])
+
+        return J
 
 
     def solve(self, q1,q2, FinalTime,implicit=False,stepsize=1e-5,xl=0,tl=0,
@@ -440,6 +457,9 @@ class Pipe1D(DG.DG_1D):
         t1 = timing.time()
 
         print('Simulation finished \nTime: {:.2f} seconds'.format(t1-t0))
+
+        JJJ = self.fluxJacobian(q)
+        pdb.set_trace()
 
         return solq1,solq2,tVec
 
