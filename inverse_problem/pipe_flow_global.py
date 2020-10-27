@@ -21,6 +21,12 @@ class Pipe1D(DG.DG_1D):
         self.diameter = diameter
         self.A = (diameter/2)**2 * np.pi
         self.L = xmax-xmin
+        self.newton_tol = 1e-6
+        self.MaxNewtonIter = 50
+        self.reg = 1e-6
+
+        self.alpha_BDF = np.array([1, -4/3, 1/3])
+        self.beta = 2/3
 
 
     def Leakage(self,time,xElementL,tl,pressure=0,rho=0):
@@ -54,14 +60,14 @@ class Pipe1D(DG.DG_1D):
 
         J = np.zeros((m,m))
 
-        F = -self.PipeRHS1D(time,q)
+        F = self.PipeRHS1D(time,q)
         for col in range(m):
             pert = np.zeros(m)
             pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(q[col]), 1)
             pert[col] = pert_jac
 
             qpert = q + pert
-            Fpert = -self.PipeRHS1D(time,qpert)
+            Fpert = self.PipeRHS1D(time,qpert)
 
             J[:,col] = (Fpert-F) / pert_jac
 
@@ -71,7 +77,7 @@ class Pipe1D(DG.DG_1D):
         newton_tol = 1e-8
         MaxNewtonIter = 50
 
-        LHS = self.ComputeJacobian(0,q)
+        LHS = -self.ComputeJacobian(0,q)
 
         newton_error = 1e2
         iterations = 0
@@ -229,35 +235,102 @@ class Pipe1D(DG.DG_1D):
 
         return solq1, solq2, tVec
 
+    def InitialStep(self,f):
+
+        self.J = self.ComputeJacobian(self.time,self.sol[-1])
+        J = self.J
+        LHS = 1/self.stepsize*np.eye(self.m) - J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1/self.stepsize*(U_old - self.sol[-1]) - f(self.time,U_old))
+
+            delta_U = np.linalg.solve(LHS,RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
+
+    def UpdateState(self,f):
+
+        J = self.J#self.ComputeJacobian(self.sol[-1])
+
+        LHS = 1 / self.stepsize * np.eye(self.m) - self.beta*J
+
+        newton_error = 1e2
+        iterations = 0
+        U_old = self.sol[-1]
+        while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
+            RHS = -(1 / self.stepsize * (self.alpha_BDF[0]*U_old + self.alpha_BDF[1]*self.sol[-1]+ self.alpha_BDF[2]*self.sol[-2]) - self.beta*f(self.time, U_old))
+
+            delta_U = np.linalg.solve(LHS, RHS)
+
+            U_old = U_old + delta_U
+
+            newton_error = np.max(np.abs(delta_U))
+            iterations = iterations + 1
+
+        return U_old
+
     def ImplicitIntegration(self, q1, q2,FinalTime):
 
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
-        time = 0
-        m = self.Np * self.K
+        self.time = 0
+        self.t0 = 0
+        self.m = 2*self.Np * self.K
 
-        solq1 = [q1]
-        solq2 = [q2]
-        tVec = [time]
+        solq1 = [q1.flatten('F')]
+        solq2 = [q2.flatten('F')]
 
         i = 0
 
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
-        while time < FinalTime:
+        self.sol = [q]
+        tVec = [self.t0]
 
-            solq1.append(q1.flatten('F'))
-            solq2.append(q2.flatten('F'))
 
-            time = time + self.stepsize
-            tVec.append(time)
+        self.time += self.stepsize
+        tVec.append(self.time)
+
+        self.qn = self.InitialStep(self.PipeRHS1D)
+        self.qn[0:int((self.m / 2))] = self.SlopeLimitN(np.reshape(self.qn[0:int((self.m / 2))], (self.N + 1, self.K), 'F')).flatten('F')
+        self.qn[-int((self.m / 2)):] = self.SlopeLimitN(np.reshape(self.qn[-int((self.m / 2)):], (self.N + 1, self.K), 'F')).flatten('F')
+
+
+        self.sol.append(self.qn)
+        solq1.append(self.qn[0:int((self.m / 2))])
+        solq2.append(self.qn[-int((self.m / 2)):])
+
+        while self.time < FinalTime:
+            self.time = self.time + self.stepsize
+            tVec.append(self.time)
+
+            self.qn = self.UpdateState(self.PipeRHS1D)
+            self.qn[0:int((self.m / 2))] = self.SlopeLimitN(
+                np.reshape(self.qn[0:int((self.m / 2))], (self.N + 1, self.K), 'F')).flatten('F')
+            self.qn[-int((self.m / 2)):] = self.SlopeLimitN(
+                np.reshape(self.qn[-int((self.m / 2)):], (self.N + 1, self.K), 'F')).flatten('F')
+
+            self.sol.append(self.qn)
+
+            solq1.append(self.qn[0:int((self.m / 2))])
+            solq2.append(self.qn[-int((self.m / 2)):])
+
 
             i += 1
-            if i % 100 == 0:
-                print(str(int(time / self.FinalTime * 100)) + '% Done')
+            if i % 1 == 0:
+                print(str(int(self.time / self.FinalTime * 100)) + '% Done')
 
-        return solq1, solq2, tVec
 
-    def GlobalBoundaryConditionMatrices(self,inflow = [1,1],outflow = [1,1]):
+        return np.asarray(solq1), np.asarray(solq2), tVec
+
+    def GlobalBoundaryConditionMatrices(self):
 
         I = np.eye(self.K)
         subdiag = np.eye(self.K, k=-1)
@@ -334,6 +407,38 @@ class Pipe1D(DG.DG_1D):
         print('Simulation finished \nTime: {:.2f} seconds'.format(t1-t0))
 
         return solq1,solq2,tVec
+
+    def measurementFunction(self, q):
+        q1 = q[0:int(len(q) / 2)]
+        q2 = q[-int(len(q) / 2):]
+
+        y = np.zeros(2 * self.Np * self.K)
+
+        y[-1] = q2[-1] / q1[-1]
+
+        return y
+
+    def RHSAdjoint(self, t, adj, q, obs):
+
+        J = self.ComputeJacobian(t, q)
+        y = self.measurementFunction(q)
+
+        rhsAdj = -np.dot(np.transpose(J), adj) + self.reg * np.abs(y - obs)
+
+        return rhsAdj
+
+    def SolveAdjoint(self, q1, q2, obs):
+
+        q = np.concatenate((q1, q2))
+        adj = q
+        rhsAdj = self.RHSAdjoint(0, adj, q, obs)
+
+        adjoint_sol = []
+
+        while t > 0:
+
+
+        return adjoint_sol
 
 
 

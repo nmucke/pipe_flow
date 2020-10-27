@@ -13,7 +13,7 @@ K = 100
 xmin = 0.
 xmax = 5000.
 
-integrator = True
+implicit = True
 
 poly = 'legendre'
 
@@ -36,13 +36,13 @@ mu = 1.04e-1
 initInflow = 2.
 initOutPres = 5e5
 
-FinalTime = 30.
+FinalTime = 300.
 
 pinit = initOutPres*np.ones(DG_model_pipe.x.shape)
 q1init = ((pinit - DG_model_pipe.p0) / (DG_model_pipe.c ** 2) + DG_model_pipe.rho0) * DG_model_pipe.A
 q2init = initInflow*np.ones((N+1,K))*q1init
 
-solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=integrator,stepsize=2e0,
+solq1,solq2, time = DG_model_pipe.solve(q1init,q2init, FinalTime=FinalTime,implicit=implicit,stepsize=2e0,
                                         xl=xl,tl=tl,leak_type='discharge',Cv=Cv,pamb=pamb,mu=mu,
                                         initInflow=initInflow,initOutPres=initOutPres)
 #%%
@@ -58,9 +58,31 @@ for i in range(len(solq1)):
     p.append(np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
     pBar.append(1e-5*np.reshape(c*c*(solq1[i]/DG_model_pipe.A-rho0)+p0, (N + 1) * K, 'F'))
 
+leaked_mass = []
+for t in range(len(time)):
+    leak = DG_model_pipe.Leakage(time[t],DG_model_pipe.xElementL,tl,pressure=p[t],rho=rho[t])
+    leaked_mass.append(leak[0,DG_model_pipe.xElementL])
 
-DG_model_pipe_adjoint = pipe_flow_adjoint.Pipe1D_Adjoint(DG_model_pipe)
+pressure_leak = []
+for t in range(len(time)):
+    mean_pressure = np.mean(np.reshape(p[t], (DG_model_pipe.Np, DG_model_pipe.K), 'F')[:, DG_model_pipe.xElementL])
+    pressure_leak.append(mean_pressure)
+benjamin_data = np.genfromtxt('benjamin_data.csv',delimiter=',')
+benjamin_time = benjamin_data[:,0]
+benjamin_mass_leak = benjamin_data[:,1]
 
-obs = np.zeros(2*(N+1)*K)
+plt.figure()
+plt.plot(time,leaked_mass,label='DG',linewidth=2)
+plt.plot(benjamin_time,benjamin_mass_leak,label='Rosa',linewidth=2)
+plt.grid(True)
+plt.legend()
+plt.xlabel('Time (s)')
+plt.ylabel('Mass Flow Through Leak (kg/s)')
+plt.savefig('leaked_mass')
+plt.show()
 
-lol = DG_model_pipe_adjoint.SolveAdjoint(solq1[-1],solq2[-1],obs)
+#DG_model_pipe_adjoint = pipe_flow_adjoint.Pipe1D_Adjoint(DG_model_pipe)
+
+#obs = np.zeros(2*(N+1)*K)
+
+#lol = DG_model_pipe_adjoint.SolveAdjoint(solq1[-1],solq2[-1],obs)
