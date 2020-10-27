@@ -50,20 +50,20 @@ class Pipe1D(DG.DG_1D):
         friction_term = 0.5 * self.diameter * np.pi * f_friction * q1 / self.A * u * u
         return friction_term
 
-    def ComputeJacobian(self,q):
+    def ComputeJacobian(self,time,q):
 
         m = 2*((self.N+1)*self.K)
 
         J = np.zeros((m,m))
 
-        F = -self.PipeRHS1D(0,q)
+        F = -self.PipeRHS1D(time,q)
         for col in range(m):
             pert = np.zeros(m)
             pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(q[col]), 1)
             pert[col] = pert_jac
 
             qpert = q + pert
-            Fpert = -self.PipeRHS1D(0,qpert)
+            Fpert = -self.PipeRHS1D(time,qpert)
 
             J[:,col] = (Fpert-F) / pert_jac
 
@@ -73,7 +73,7 @@ class Pipe1D(DG.DG_1D):
         newton_tol = 1e-8
         MaxNewtonIter = 50
 
-        LHS = self.ComputeJacobian(q)
+        LHS = self.ComputeJacobian(0,q)
 
         newton_error = 1e2
         iterations = 0
@@ -146,8 +146,8 @@ class Pipe1D(DG.DG_1D):
         q2Flux = np.divide(np.power(q2, 2), q1) + pressure * self.A
 
 
-        LFc = np.ones((self.Np*self.K))
-        LFc[self.edgesIdx] = np.max(np.maximum((lm[self.vmapM]), (lm[self.vmapP])))
+        self.LFc = np.ones((self.Np*self.K))
+        self.LFc[self.edgesIdx] = np.max(np.maximum((lm[self.vmapM]), (lm[self.vmapP])))
 
         if time >= self.tl[0,0] and time <= 200:
             self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
@@ -162,14 +162,11 @@ class Pipe1D(DG.DG_1D):
         q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout * self.A
 
 
-        #rhsq1 = -np.dot(self.S_global,q1Flux)-np.dot(self.G_global,q1Flux)-LFc/2*np.dot(self.F_global,q1) - np.dot(self.invM_global,self.f_l.flatten('F'))
-        #rhsq2 = -np.dot(self.S_global, q2Flux) - np.dot(self.G_global, q2Flux) - LFc / 2 * np.dot(self.F_global,q2)-friction_term
-        rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(self.f_l.flatten('F'))
-        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - LFc / 2 *self.F_global.dot(q2)  - friction_term
+        rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - self.LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(self.f_l.flatten('F'))
+        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - self.LFc / 2 *self.F_global.dot(q2)  - friction_term
 
-
-        rhsq1 += q1FluxIn*self.e1BC - q1FluxOut*self.eNpKBC + LFc*(q1in*self.e1BC+q1out*self.eNpKBC)
-        rhsq2 += q2FluxIn*self.e1BC - q2FluxOut*self.eNpKBC + LFc *(q2in*self.e1BC+q2out*self.eNpKBC)
+        rhsq1 += q1FluxIn*self.e1BC - q1FluxOut*self.eNpKBC + self.LFc*(q1in*self.e1BC+q1out*self.eNpKBC)
+        rhsq2 += q2FluxIn*self.e1BC - q2FluxOut*self.eNpKBC + self.LFc *(q2in*self.e1BC+q2out*self.eNpKBC)
 
         return np.concatenate((rhsq1,rhsq2),axis=0)
 
@@ -298,6 +295,7 @@ class Pipe1D(DG.DG_1D):
         self.G_global[-self.Np:, -self.Np:] -= 0.5 * self.H
         self.F_global[-self.Np:, -self.Np:] += self.H
 
+
         self.G_global = np.dot(self.invM_global, self.G_global)
         self.F_global = np.dot(self.invM_global, self.F_global)
 
@@ -378,12 +376,133 @@ class Pipe1D(DG.DG_1D):
         q2 = q[-int(len(q) / 2):]
 
         dq1f1 = np.diag(0*q1)
-        dq2f1 = np.diag(q2/q2)
+        dq2f1 = np.eye(q2.shape[0])
+
 
         dq1f2 = np.diag(-q2*q2/q1/q1+self.c*self.c)
         dq2f2 = np.diag(2*q2/q1)
 
-        J = np.array([[dq1f1,dq2f1],[dq1f2,dq2f2]])
+        J = np.bmat([[dq1f1,dq2f1],[dq1f2,dq2f2]])
+
+
+        return J
+
+    def ComputeJacobianFriction(self,q):
+
+        q1 = q[0:int(len(q) / 2)]
+        q2 = q[-int(len(q) / 2):]
+
+        m = 2*((self.N+1)*self.K)
+
+        J = np.zeros((m,m))
+
+        F = self.Friction(q1,q2,q2/q1)
+        F = np.concatenate((np.zeros(q1.shape),F))
+        for col in range(m):
+            pert = np.zeros(m)
+            pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(q[col]), 1)
+            pert[col] = pert_jac
+
+            qpert = q + pert
+
+            q1 = qpert[0:int(len(q) / 2)]
+            q2 = qpert[-int(len(q) / 2):]
+            Fpert = self.Friction(q1,q2,q2/q1)
+            Fpert = np.concatenate((np.zeros(q1.shape),Fpert))
+
+            J[:,col] = (Fpert-F) / pert_jac
+
+        return J
+
+    def rhsJacobian(self,q):
+        q1 = q[0:int(len(q) / 2)]
+        q2 = q[-int(len(q) / 2):]
+
+        J = self.fluxJacobian(q)
+        fricJac = self.ComputeJacobianFriction(q)
+
+        dq1BC1 = np.zeros((self.Np*self.K,self.Np*self.K))
+        dq2BC1 = np.zeros((self.Np * self.K,self.Np*self.K))
+        dq1BC1[0,0] = np.max(self.LFc)
+        dq2BC1[0,0] = 1
+
+        dq1BC1 = np.dot(self.invM_global.todense(),dq1BC1)
+        dq2BC1 = np.dot(self.invM_global.todense(),dq2BC1)
+
+        dq1BC2 = np.zeros((self.Np*self.K,self.Np*self.K))
+        dq1BC2[-1,-1] = -q2[self.vmapO] * q2[self.vmapO] / q1[self.vmapO] / q1[self.vmapO] + self.c * self.c
+
+        dq2BC2 = np.zeros((self.Np * self.K,self.Np*self.K))
+        dq2BC2[-1,-1] = 2 * q2[self.vmapO] / q1[self.vmapO] + np.max(self.LFc)
+
+        dq1BC2 = np.dot(self.invM_global.todense(),dq1BC2)
+        dq2BC2 = np.dot(self.invM_global.todense(),dq2BC2)
+
+        JBC = np.bmat([[dq1BC1,dq2BC1],[dq1BC2,dq2BC2]])
+
+
+        J = np.dot(-np.kron(np.eye(2),self.S_global.todense()+self.G_global.todense()),J) \
+                -np.max(self.LFc)/2 * np.kron(np.eye(2),self.F_global.todense())#-fricJac#+JBC
+        return J
+
+
+    def PipeRHS1Dtest(self,time,q):
+
+        q1 = q[0:int(len(q)/2)]
+        q2 = q[-int(len(q)/2):]
+
+        u = np.divide(q2, q1)
+
+        pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
+
+        self.f_l = self.Leakage(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
+        friction_term = self.Friction(q1,q2,u)
+
+        cvel = self.c/np.sqrt(self.A)
+        lm = np.abs(u) + cvel
+
+        q1Flux = q2
+        q2Flux = np.divide(np.power(q2, 2), q1) + pressure * self.A
+
+
+        LFc = np.max(self.LFc)
+
+        if time >= self.tl[0,0] and time <= 200:
+            self.uIn = -self.initInflow*0.9/180*time + self.initInflow*(1+0.9/180*20)
+            self.pOut = -self.initOutPres*0.7/180*time + self.initOutPres*(1+0.7/180*20)
+
+        q1in, q1out, q2in, q2out, pin, pout = self.BoundaryConditions(q1, q2, time)
+
+        q1FluxIn = q2in
+        q2FluxIn = np.divide(np.power(q2in, 2), q1in) + pin * self.A
+
+        q1FluxOut = q2out
+        q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout * self.A
+
+        rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(self.f_l.flatten('F'))
+        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - LFc / 2 *self.F_global.dot(q2)# - friction_term
+
+        #rhsq1 += q1FluxIn*self.e1BC - q1FluxOut*self.eNpKBC + np.max(self.LFc)*(q1in*self.e1BC+q1out*self.eNpKBC)
+        #rhsq2 += q2FluxIn*self.e1BC - q2FluxOut*self.eNpKBC + np.max(self.LFc) *(q2in*self.e1BC+q2out*self.eNpKBC)
+
+        return np.concatenate((rhsq1,rhsq2),axis=0)
+
+    def ComputeJacobianTest(self,q):
+
+        m = 2*((self.N+1)*self.K)
+
+        J = np.zeros((m,m))
+
+        F = -self.PipeRHS1Dtest(0,q)
+        for col in range(m):
+            pert = np.zeros(m)
+            pert_jac = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(q[col]), 1)
+            pert[col] = pert_jac
+
+            qpert = q + pert
+            Fpert = -self.PipeRHS1Dtest(0,qpert)
+
+            J[:,col] = (Fpert-F) / pert_jac
 
         return J
 
@@ -414,9 +533,7 @@ class Pipe1D(DG.DG_1D):
         #q1 = q[0:int(len(q) / 2)]
         #q2 = q[-int(len(q) / 2):]
 
-
-
-
+        '''
         benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',',dtype=np.float64)
         ben_xu = benjamin_u[:, 0]
         ben_u = benjamin_u[:, 1]
@@ -445,6 +562,13 @@ class Pipe1D(DG.DG_1D):
         plt.title('Pressure')
         plt.savefig('pressure_comparison')
         plt.show()
+        
+        pdb.set_trace()
+        JJJ = self.rhsJacobian(np.concatenate((q1,q2)))
+        JJ = self.ComputeJacobianTest(np.concatenate((q1,q2)))
+        pdb.set_trace()
+        '''
+
 
         q1 = self.SlopeLimitN(np.reshape(q1,(self.N+1,self.K),'F'))
         q2 = self.SlopeLimitN(np.reshape(q2,(self.N+1,self.K),'F'))
@@ -457,9 +581,6 @@ class Pipe1D(DG.DG_1D):
         t1 = timing.time()
 
         print('Simulation finished \nTime: {:.2f} seconds'.format(t1-t0))
-
-        JJJ = self.fluxJacobian(q)
-        pdb.set_trace()
 
         return solq1,solq2,tVec
 

@@ -49,7 +49,7 @@ poly = 'legendre'
 integrator = True
 for xl in [500]:
     N = 3
-    K = 5
+    K = 100
 
     xmin = 0.
     xmax = 5000.
