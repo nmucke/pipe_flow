@@ -5,6 +5,7 @@ import time as timing
 import discontinuous_galerkin_global as DG
 import time_integrators as time_int
 
+import scipy.sparse as sparse
 from scipy.sparse import csr_matrix
 
 
@@ -27,6 +28,8 @@ class Pipe1D(DG.DG_1D):
 
         self.alpha_BDF = np.array([1, -4/3, 1/3])
         self.beta = 2/3
+
+        self.GlobalBoundaryConditionMatrices()
 
 
     def Leakage(self,time,xElementL,tl,pressure=0,rho=0):
@@ -167,8 +170,8 @@ class Pipe1D(DG.DG_1D):
 
         CFL = .8
 
-        solq1 = [q1]
-        solq2 = [q2]
+        solq1 = [q1.flatten('F')]
+        solq2 = [q2.flatten('F')]
         tVec = [time]
 
 
@@ -232,8 +235,7 @@ class Pipe1D(DG.DG_1D):
             i += 1
             if i % 100 == 0:
                 print(str(int(time/self.FinalTime*100)) + '% Done' )
-
-        return solq1, solq2, tVec
+        return np.asarray(solq1), np.asarray(solq2), tVec
 
     def InitialStep(self,f):
 
@@ -387,7 +389,6 @@ class Pipe1D(DG.DG_1D):
         self.pOut = initOutPres
         self.edgesIdx = np.unique(np.concatenate((self.vmapM,self.vmapP)))
 
-        self.GlobalBoundaryConditionMatrices()
 
 
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
@@ -412,33 +413,118 @@ class Pipe1D(DG.DG_1D):
         q1 = q[0:int(len(q) / 2)]
         q2 = q[-int(len(q) / 2):]
 
-        y = np.zeros(2 * self.Np * self.K)
+        y = np.zeros(self.Np * self.K)
 
         y[-1] = q2[-1] / q1[-1]
 
+        y = np.concatenate((y,y),axis=0)
+
         return y
+
+    def measurementFunctionDerivative(self, q):
+        q1 = q[0:int(len(q) / 2)]
+        q2 = q[-int(len(q) / 2):]
+
+        dy1 = np.zeros(self.Np * self.K)
+        dy1[-1] = -q2[-1] / q1[-1] / q1[-1]
+
+        dy2 = np.zeros(self.Np * self.K)
+        dy2[-1] = 1 / q1[-1]
+
+        dy = np.concatenate((dy1, dy2), axis=0)
+
+        return dy
+
 
     def RHSAdjoint(self, t, adj, q, obs):
 
         J = self.ComputeJacobian(t, q)
         y = self.measurementFunction(q)
+        dy = self.measurementFunctionDerivative(q)
 
-        rhsAdj = -np.dot(np.transpose(J), adj) + self.reg * np.abs(y - obs)
+        rhsAdj = np.dot(np.transpose(J), adj) - np.abs(y - obs)*dy
 
         return rhsAdj
 
-    def SolveAdjoint(self, q1, q2, obs):
+    def SolveAdjoint(self, q1, q2, obs,tVec):
 
-        q = np.concatenate((q1, q2))
-        adj = q
-        rhsAdj = self.RHSAdjoint(0, adj, q, obs)
+        tVecAdj = []
+        q = np.concatenate((q1, q2),axis=1)
+        self.adj = np.zeros((2*self.Np*self.K))
+        adjoint_sol = [self.adj]
 
-        adjoint_sol = []
+        self.adjStepSize = tVec[-1] - tVec[-2]
 
-        while t > 0:
+        self.time = tVec[-1]
+        self.t0 = tVec[-1]
+
+        i = 0
+
+        self.time -= self.stepsize
+        tVecAdj.append(self.time)
+
+        #initial step
+        y = self.measurementFunction(q[-2])
+        dy = self.measurementFunctionDerivative(q[-2])
+
+        LHS = np.eye(self.m) + self.adjStepSize*self.ComputeJacobian(self.time,q[-2])
+        RHS = adjoint_sol[0] + self.adjStepSize*np.abs(y - obs[-2])*dy
+
+        self.adj = np.linalg.solve(LHS,RHS)
+        self.adj[0:int((self.m / 2))] = self.SlopeLimitN(
+            np.reshape(self.adj[0:int((self.m / 2))], (self.N + 1, self.K), 'F')).flatten('F')
+        self.adj[-int((self.m / 2)):] = self.SlopeLimitN(
+            np.reshape(self.adj[-int((self.m / 2)):], (self.N + 1, self.K), 'F')).flatten('F')
+
+        adjoint_sol.append(self.adj)
+
+        time_idx = 2
+        while self.time > 0:
+            self.adjStepSize = tVec[-time_idx] - tVec[-(time_idx+1)]
+            self.time = self.time - self.adjStepSize
+            tVecAdj.append(self.time)
+
+            y = self.measurementFunction(q[-(time_idx+1)])
+            dy = self.measurementFunctionDerivative(q[-(time_idx+1)])
+
+            LHS = np.eye(self.m) - self.adjStepSize * self.ComputeJacobian(self.time, q[-(time_idx+1)])
+            RHS = adjoint_sol[time_idx-1] - self.adjStepSize * np.abs(y - obs[-(time_idx+1)]) * dy
+
+            self.adj = np.linalg.solve(LHS, RHS)
+
+            self.adj[0:int((self.m / 2))] = self.SlopeLimitN(
+                np.reshape(self.adj[0:int((self.m / 2))], (self.N + 1, self.K), 'F')).flatten('F')
+            self.adj[-int((self.m / 2)):] = self.SlopeLimitN(
+                np.reshape(self.adj[-int((self.m / 2)):], (self.N + 1, self.K), 'F')).flatten('F')
+
+            adjoint_sol.append(self.adj)
+
+            time_idx += 1
+            if time_idx % 1 == 0:
+                print(str(int(self.time / self.FinalTime * 100)) + '% Done')
 
 
-        return adjoint_sol
+        '''
+        while self.time < FinalTime:
+            self.time = self.time + self.stepsize
+            tVec.append(self.time)
+
+            self.qn = self.UpdateState(self.PipeRHS1D)
+            self.qn[0:int((self.m / 2))] = self.SlopeLimitN(
+                np.reshape(self.qn[0:int((self.m / 2))], (self.N + 1, self.K), 'F')).flatten('F')
+            self.qn[-int((self.m / 2)):] = self.SlopeLimitN(
+                np.reshape(self.qn[-int((self.m / 2)):], (self.N + 1, self.K), 'F')).flatten('F')
+
+            self.sol.append(self.qn)
+
+            solq1.append(self.qn[0:int((self.m / 2))])
+            solq2.append(self.qn[-int((self.m / 2)):])
+
+            i += 1
+            if i % 1 == 0:
+                print(str(int(self.time / self.FinalTime * 100)) + '% Done')
+        '''
+        return np.asarray(adjoint_sol)
 
 
 
