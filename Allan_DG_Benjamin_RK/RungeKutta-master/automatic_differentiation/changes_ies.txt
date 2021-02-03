@@ -1,0 +1,19 @@
+Changes to adiff:
+-In subsasgn, changed
+a.dx = subsasgn(full(a.dx),s,full(b.dx));
+to
+a.dx = subsasgn((a.dx),s,(b.dx));
+, which is much faster for large arrays when using a sparse dx array
+- Added lt, gt, ge, and le functions
+- In adiff/plus.m, removed the use of repmat on the double input if one input is double and the other is adiff. Could lead to wrong results. Changed to checking for equal lengths instead:
+if numel(a.x)~=numel(b)
+	assert(numel(b)==1);        
+end
+- Added overloaded numel.m (which might be controversial but seems to work)
+- Added isfinite & isnan
+- Removed returning transposed jacobian in autodiff_sparse.m and autodiff.m
+- Removed interp1.m file, not a class function, so conflict with the regular interp1 file from matlab. Also, it was not used any places.
+
+BS:
+- changed mtimes.m to add logicaladiff and adifflogical
+- added eq.m

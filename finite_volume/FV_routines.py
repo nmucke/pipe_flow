@@ -22,7 +22,6 @@ class FV_1D():
         self.x = np.linspace(self.xmin,self.xmax,self.num_volumes+1)
         self.xmid = 0.5*(self.x[0:self.num_volumes] + self.x[1:self.num_volumes+1])
 
-
         #self.D_p = -np.eye(num_volumes,num_volumes+1) + np.eye(num_volumes,num_volumes+1,1)
         #self.I_p = 0.5*(np.eye(num_volumes + 1, num_volumes) + np.eye(num_volumes + 1, num_volumes, -1))
 
@@ -40,7 +39,6 @@ class FV_1D():
 
         self.I_u = 0.5 * (np.eye(num_volumes, num_volumes) + np.eye(num_volumes, num_volumes, 1))
         self.I_u[-1,0] = 0.5
-
 
         self.rk4a = np.array([0.0, -567301805773.0 / 1357537059087.0, -2404267990393.0 / 2016746695238.0,
                               -3550918686646.0 / 2091501179385.0, -1275806237668.0 / 842570457699.0])

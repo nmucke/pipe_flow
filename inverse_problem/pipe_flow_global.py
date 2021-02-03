@@ -268,8 +268,8 @@ class Pipe1D(DG.DG_1D):
         iterations = 0
         U_old = self.sol[-1]
         while newton_error > self.newton_tol and iterations < self.MaxNewtonIter:
-            RHS = -(1 / self.stepsize * (self.alpha_BDF[0]*U_old + self.alpha_BDF[1]*self.sol[-1]+ self.alpha_BDF[2]*self.sol[-2]) - self.beta*f(self.time, U_old))
-
+            #RHS = -(1 / self.stepsize * (self.alpha_BDF[0]*U_old + self.alpha_BDF[1]*self.sol[-1]+ self.alpha_BDF[2]*self.sol[-2]) - self.beta*f(self.time, U_old))
+            RHS = -(1 / self.stepsize * (U_old - self.sol[-1]) - f(self.time, U_old))
             delta_U = np.linalg.solve(LHS, RHS)
 
             U_old = U_old + delta_U

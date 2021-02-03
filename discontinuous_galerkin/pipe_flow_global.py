@@ -27,6 +27,7 @@ class Pipe1D(DG.DG_1D):
 
     def Leakage(self,time,xElementL,tl,pressure=0,rho=0):
 
+
         f_l = np.zeros((self.x.shape))
         if self.leak_type == 'mass':
             for i in range(len(tl)):
@@ -35,13 +36,33 @@ class Pipe1D(DG.DG_1D):
         elif self.leak_type == 'discharge':
             for i in range(len(tl)):
                 if time >= tl[i, 0] and time < tl[i, 1]:
+
+                    l = np.zeros(self.N + 1)
+                    rl = 2 * (self.xl - self.VX[xElementL]) / self.deltax - 1
+                    for i in range(0,self.N+1):
+                        l[i] = DG.JacobiP(np.array([rl]), 0, 0, i)
+
+                    l = np.linalg.solve(np.transpose(self.V),l)
+
+                    pressureL = np.reshape(pressure, (self.Np, self.K), 'F')
+                    pressureL = self.EvaluateSol(np.array([self.xl]), pressureL)[0]
+                    rhoL = np.reshape(rho, (self.Np, self.K), 'F')
+                    rhoL = self.EvaluateSol(np.array([self.xl]), rhoL)[0]
+
+                    discharge_sqrt_coef = (pressureL - self.pamb)*rhoL
+                    f_l[:, xElementL] = self.Cv*np.sqrt(discharge_sqrt_coef)*l
+
+                    '''
                     mean_pressure = np.mean(np.reshape(pressure,(self.Np,self.K),'F')[:,xElementL])
                     mean_rho = np.mean(np.reshape(rho,(self.Np,self.K),'F')[:,xElementL])
                     discharge_sqrt_coef = mean_rho*(mean_pressure-self.pamb)
                     if discharge_sqrt_coef < 0:
                         print('Discharge sqrt coefficient is negative!')
                         break
+                    discharge_sqrt_coef =  (mean_pressure - self.pamb)*mean_rho
                     f_l[:, xElementL] = self.Cv*np.sqrt(discharge_sqrt_coef)
+                    '''
+
         return f_l
 
     def Friction(self,q1,q2,u):
@@ -136,7 +157,7 @@ class Pipe1D(DG.DG_1D):
 
         pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
 
-        self.f_l = self.Leakage(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
+        f_l = self.Leakage(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
         friction_term = self.Friction(q1,q2,u)
 
         cvel = self.c/np.sqrt(self.A)
@@ -161,9 +182,8 @@ class Pipe1D(DG.DG_1D):
         q1FluxOut = q2out
         q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout * self.A
 
-
-        rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - self.LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(self.f_l.flatten('F'))
-        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - self.LFc / 2 *self.F_global.dot(q2)  - friction_term
+        rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - self.LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(f_l.flatten('F'))#f_l.flatten('F')#
+        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - self.LFc / 2 *self.F_global.dot(q2) - friction_term
 
         rhsq1 += q1FluxIn*self.e1BC - q1FluxOut*self.eNpKBC + self.LFc*(q1in*self.e1BC+q1out*self.eNpKBC)
         rhsq2 += q2FluxIn*self.e1BC - q2FluxOut*self.eNpKBC + self.LFc *(q2in*self.e1BC+q2out*self.eNpKBC)
@@ -513,6 +533,7 @@ class Pipe1D(DG.DG_1D):
         self.FinalTime = FinalTime
         self.stepsize = stepsize
         self.tl = tl
+        self.xl = xl
         self.xElementL = np.int(xl/self.xmax * self.K)
         self.leak_type = leak_type
         self.Cv = Cv
