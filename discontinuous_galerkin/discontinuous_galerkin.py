@@ -143,14 +143,7 @@ class DG_1D:
             alpha = -0.5
             beta = -0.5
 
-        self.r = JacobiGL(alpha,beta,self.N)
-        self.V = Vandermonde1D(self.r,alpha,beta,self.N)
-        self.invV = np.linalg.inv(self.V)
-        self.Dr = Dmatrix1D(self.r,alpha,beta,self.N,self.V)
-        self.M = np.transpose(np.linalg.solve(np.transpose(self.invV),self.invV))
-        self.invM = np.linalg.inv(self.M)
-
-        self.LIFT = lift1D(self.Np,self.Nfaces,self.Nfp,self.V)
+        self.r = JacobiGL(alpha, beta, self.N)
         self.Nv, self.VX, self.K, self.EtoV = MeshGen1D(self.xmin, self.xmax, self.K)
 
         self.va = np.transpose(self.EtoV[:, 0])
@@ -158,6 +151,19 @@ class DG_1D:
         self.x = np.ones((self.Np, 1)) * self.VX[self.va.astype(int)] + 0.5 * (np.reshape(self.r, (len(self.r), 1)) + 1) \
                 * (self.VX[self.vb.astype(int)] - self.VX[self.va.astype(int)])
         self.deltax = np.min(np.abs(self.x[0, :] - self.x[-1, :]))
+
+        self.r = JacobiGL(alpha,beta,self.N)
+        self.V = Vandermonde1D(self.r,alpha,beta,self.N)
+        self.invV = np.linalg.inv(self.V)
+        self.Dr = Dmatrix1D(self.r,alpha,beta,self.N,self.V)
+        #self.M = np.transpose(np.linalg.solve(np.transpose(self.invV),self.invV))
+        #self.invM = np.linalg.inv(self.M)
+        self.invM = np.dot(self.V, np.transpose(self.V))
+        self.M = np.linalg.inv(self.invM)
+        self.invMk = 2 / self.deltax * self.invM
+
+        self.LIFT = lift1D(self.Np,self.Nfaces,self.Nfp,self.V)
+
 
         fmask1 = np.where(np.abs(self.r + 1.) < self.NODETOL)[0]
         fmask2 = np.where(np.abs(self.r - 1.) < self.NODETOL)[0]
@@ -297,7 +303,8 @@ class DG_1D:
 
         ux = (2/hN) * np.dot(self.Dr,ul)
 
-        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
+        #ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
+        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmod(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0)))
 
         return ulimit
 
@@ -359,7 +366,7 @@ class DG_1D:
 
         sol_modal = np.dot(self.invV, sol_nodal)
 
-        if x == self.VX:
+        if x == np.any(self.VX):
 
             i_interface = np.argwhere(x == self.VX)
 

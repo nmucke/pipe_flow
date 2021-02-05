@@ -500,7 +500,7 @@ class Pipe1D(DG.DG_1D):
         q2FluxOut = np.divide(np.power(q2out, 2), q1out) + pout * self.A
 
         rhsq1 = -self.S_global.dot(q1Flux) - self.G_global.dot(q1Flux) - LFc / 2 *self.F_global.dot(q1) - self.invM_global.dot(self.f_l.flatten('F'))
-        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - LFc / 2 *self.F_global.dot(q2)# - friction_term
+        rhsq2 = -self.S_global.dot(q2Flux) - self.G_global.dot(q2Flux) - LFc / 2 *self.F_global.dot(q2) - friction_term
 
         #rhsq1 += q1FluxIn*self.e1BC - q1FluxOut*self.eNpKBC + np.max(self.LFc)*(q1in*self.e1BC+q1out*self.eNpKBC)
         #rhsq2 += q2FluxIn*self.e1BC - q2FluxOut*self.eNpKBC + np.max(self.LFc) *(q2in*self.e1BC+q2out*self.eNpKBC)

@@ -44,10 +44,10 @@ solsp = []
 poly = 'legendre'
 integrator = False
 error = []
-N_vec = [1,2,3,4]
+N_vec = [2]
 for N in N_vec:
     #N = 2
-    K = 1024
+    K = 100
 
     xmin = 0
     xmax = 1.
@@ -60,12 +60,12 @@ for N in N_vec:
     FinalTime = 1.8
 
     ts = 2.
-    eps = 0.000001*np.pi
+    eps = 0.0000000001*np.pi
     #uinit = -np.tanh((burgers.x+0.5)/eps) + 1
     uinit = 1/(2*np.pi*ts)*np.sin(2*np.pi*burgers.x)
     #uinit = np.sin(burgers.x)
 
-    u, time = burgers.solve(uinit, FinalTime=FinalTime,implicit=integrator,stepsize=2e0)
+    u, time = burgers.solve(uinit, FinalTime=FinalTime,implicit=False,stepsize=2e0)
 
     u_mat = np.asarray(u)
 
@@ -76,7 +76,17 @@ for N in N_vec:
 
     error.append(np.linalg.norm(u[-1]-true_end)/np.linalg.norm(true_end))
 
+plt.figure()
+plt.plot(xVec,uinit.flatten('F'),linewidth=2,label='u init')
+plt.plot(xVec,u[np.int(len(u)/2)],linewidth=2,label='u middle')
+plt.plot(xVec,u[-1],linewidth=2,label='u end')
+plt.grid(True)
+plt.legend()
+plt.xlabel('Time (s)')
+plt.ylabel('u')
+plt.show()
 
+'''
 plt.figure()
 plt.plot(xVec,uinit.flatten('F'),linewidth=2,label='u init')
 plt.plot(xVec,u[-1],linewidth=2,label='u approx')
@@ -87,7 +97,6 @@ plt.xlabel('Time (s)')
 plt.ylabel('u')
 plt.show()
 
-
 plt.figure()
 plt.loglog(N_vec,error,'.-',linewidth=2,markersize=15)
 plt.grid(True)
@@ -95,7 +104,8 @@ plt.legend()
 plt.xlabel('N')
 plt.ylabel('error')
 plt.show()
+'''
 
-animateSolution(xVec,time[0:-1],u[0:-1])
+#animateSolution(xVec,time[0:-1],u[0:-1])
 
 

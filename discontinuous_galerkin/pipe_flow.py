@@ -31,25 +31,52 @@ class Pipe1D(DG.DG_1D):
         self.A = (diameter/2)**2 * np.pi
         self.L = xmax-xmin
 
-
-    def f_leak(self,time,xElementL,tl,pressure=0,rho=0):
+    def Leakage(self, time, xElementL, tl, pressure=0, rho=0):
 
         f_l = np.zeros((self.x.shape))
         if self.leak_type == 'mass':
             for i in range(len(tl)):
-                if time > tl[i,0] and time < tl[i,1]:
+                if time > tl[i, 0] and time < tl[i, 1]:
                     f_l[:, xElementL] = 1.
         elif self.leak_type == 'discharge':
             for i in range(len(tl)):
                 if time >= tl[i, 0] and time < tl[i, 1]:
-                    mean_pressure = np.mean(np.reshape(pressure,(self.Np,self.K),'F')[:,xElementL])
-                    mean_rho = np.mean(np.reshape(rho,(self.Np,self.K),'F')[:,xElementL])
+
+                    l = np.zeros(self.N + 1)
+                    rl = 2 * (self.xl - self.VX[xElementL]) / self.deltax - 1
+                    for i in range(0, self.N + 1):
+                        l[i] = DG.JacobiP(np.array([rl]), 0, 0, i)
+
+                    l = np.linalg.solve(np.transpose(self.V), l)
+
+                    pressureL = np.reshape(pressure, (self.Np, self.K), 'F')
+                    pressureL = self.EvaluateSol(np.array([self.xl]), pressureL)[0]
+                    rhoL = np.reshape(rho, (self.Np, self.K), 'F')
+                    rhoL = self.EvaluateSol(np.array([self.xl]), rhoL)[0]
+
+                    discharge_sqrt_coef = (pressureL - self.pamb) * rhoL
+                    f_l[:, xElementL] = self.Cv * np.sqrt(discharge_sqrt_coef) * l
+
+                    '''
+                    mean_pressure = np.mean(np.reshape(pressure,(self.Np,
+                    self.K),'F')[:,xElementL])
+                    mean_rho = np.mean(np.reshape(rho,(self.Np,self.K),
+                    'F')[:,xElementL])
                     discharge_sqrt_coef = mean_rho*(mean_pressure-self.pamb)
                     if discharge_sqrt_coef < 0:
                         print('Discharge sqrt coefficient is negative!')
                         break
+                    discharge_sqrt_coef =  (mean_pressure - self.pamb)*mean_rho
                     f_l[:, xElementL] = self.Cv*np.sqrt(discharge_sqrt_coef)
+                    '''
+
         return f_l
+
+    def Friction(self,q1,q2,u):
+        Red = q1 * self.diameter * np.abs(u) / self.A / self.mu
+        f_friction = 0.25 * 1 / ((-1.8 * np.log10((self.epsFriction / self.diameter / 3.7) ** 1.11 + 6.9 / Red)) ** 2)
+        friction_term = 0.5 * self.diameter * np.pi * f_friction * q1 / self.A * u * u
+        return friction_term
 
     def ComputeJacobian(self,q):
 
@@ -111,8 +138,8 @@ class Pipe1D(DG.DG_1D):
         q2in = (-q2[self.vmapI]/q1in + 2*self.uIn) * q1in
         q2out = q2[self.vmapO]
         '''
-        pout = self.pOut
         q1in = q1[self.vmapI]
+        pout = self.pOut
         q1out = ((self.pOut - self.p0) / (self.c ** 2) + self.rho0) * self.A
         pin = self.c * self.c * (q1in / self.A - self.rho0) + self.p0
         q2in = self.uIn * q1in
@@ -130,13 +157,16 @@ class Pipe1D(DG.DG_1D):
 
     def PipeRHS1D(self,time,q):
 
+
         q1 = q[0:int(len(q)/2)]
         q2 = q[-int(len(q)/2):]
 
         u = np.divide(q2, q1)
 
         pressure = self.c * self.c * (q1 / self.A - self.rho0) + self.p0
-        self.f_l = self.f_leak(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
+        self.f_l = self.Leakage(time, self.xElementL, self.tl, pressure=pressure, rho=q1 / self.A)
+        friction_term = self.Friction(q1,q2,u)
+
 
         cvel = self.c/np.sqrt(self.A)
         lm = np.abs(u) + cvel
@@ -187,13 +217,11 @@ class Pipe1D(DG.DG_1D):
         dq1Flux = np.reshape(dq1Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
         dq2Flux = np.reshape(dq2Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
 
-        Red = q1 * self.diameter * np.abs(u) / self.A / self.mu
-        f_friction = 0.25*1/((-1.8*np.log10((self.epsFriction/self.diameter/3.7)**1.11 + 6.9/Red))**2)
-        friction_term = 0.5*self.diameter*np.pi*f_friction*q1/self.A*u*u
-        friction_term = np.reshape(friction_term,(self.N+1,self.K),'F')
+        self.f_l[:, self.xElementL] = np.dot(self.invMk, self.f_l[:, self.xElementL])
 
-        rhsq1 = (-self.rx * np.dot(self.Dr, q1Flux) + np.dot(self.LIFT, self.Fscale * dq1Flux)) - self.rx * self.f_l
-        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux)) - friction_term
+        rhsq1 = (-self.rx * np.dot(self.Dr, q1Flux) + np.dot(self.LIFT, self.Fscale * dq1Flux)) - self.f_l
+        rhsq2 = (-self.rx * np.dot(self.Dr, q2Flux) + np.dot(self.LIFT,self.Fscale * dq2Flux)) - np.reshape(friction_term,(self.Np,self.K))
+
 
         rhsq1 = rhsq1.flatten('F')
         rhsq2 = rhsq2.flatten('F')
@@ -220,6 +248,9 @@ class Pipe1D(DG.DG_1D):
         i = 0
         #filterMat = self.Filter1D(self.N, 0, 50)
 
+        q1 = np.reshape(q1,(self.Np,self.K))
+        q2 = np.reshape(q2,(self.Np,self.K))
+
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
         while time < FinalTime:
 
@@ -242,15 +273,17 @@ class Pipe1D(DG.DG_1D):
 
                 q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
             '''
+
+            filterMat = self.Filter1D(self.N,Nc=1,s=2)
             rhs = self.PipeRHS1D(time,q)
             rhsq1,rhsq2 = rhs[0:int(m)],rhs[-int(m):]
             rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
             q1_1 = q1 + dt*rhsq1
             q2_1 = q2 + dt*rhsq2
-            #q1_1 = np.dot(filterMat,q1_1)
-            #q2_1 = np.dot(filterMat,q2_1)
-            q1_1 = self.SlopeLimitN( q1_1)
-            q2_1 = self.SlopeLimitN( q2_1)
+            #q1_1 = self.SlopeLimitN( q1_1)
+            #q2_1 = self.SlopeLimitN( q2_1)
+            q1_1 = np.dot(filterMat,q1_1)
+            q2_1 = np.dot(filterMat,q2_1)
             q_1 = np.concatenate((q1_1.flatten('F'), q2_1.flatten('F')), axis=0)
 
             rhs = self.PipeRHS1D(time,q_1)
@@ -258,10 +291,10 @@ class Pipe1D(DG.DG_1D):
             rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
             q1_2 = (3*q1 + q1_1 + dt * rhsq1)/4
             q2_2 = (3*q2 + q2_1 + dt * rhsq2)/4
-            q1_2 = self.SlopeLimitN(q1_2)
-            q2_2 = self.SlopeLimitN(q2_2)
-            #q1_2 = np.dot(filterMat,q1_2)
-            #q2_2 = np.dot(filterMat,q2_2)
+            #q1_2 = self.SlopeLimitN(q1_2)
+            #q2_2 = self.SlopeLimitN(q2_2)
+            q1_2 = np.dot(filterMat,q1_2)
+            q2_2 = np.dot(filterMat,q2_2)
             q_2 = np.concatenate((q1_2.flatten('F'), q2_2.flatten('F')), axis=0)
 
             rhs = self.PipeRHS1D(time,q_2)
@@ -269,10 +302,10 @@ class Pipe1D(DG.DG_1D):
             rhsq1, rhsq2 = np.reshape(rhsq1, (self.Np, self.K), 'F'),np.reshape(rhsq2, (self.Np, self.K), 'F')
             q1 = (q1 + 2*q1_2 + 2*dt * rhsq1) / 3
             q2 = (q2 + 2*q2_2 + 2*dt * rhsq2) / 3
-            q1 = self.SlopeLimitN( q1)
-            q2 = self.SlopeLimitN( q2)
-            #q1 = np.dot(filterMat,q1)
-            #q2 = np.dot(filterMat,q2)
+            #q1 = self.SlopeLimitN(q1)
+            #q2 = self.SlopeLimitN(q2)
+            q1 = np.dot(filterMat,q1)
+            q2 = np.dot(filterMat,q2)
             q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
 
             #F = self.Filter1D(self.N,1,2)
@@ -315,6 +348,7 @@ class Pipe1D(DG.DG_1D):
         self.initOutPres = initOutPres
         self.uIn = initInflow
         self.pOut = initOutPres
+        self.xl = xl
 
 
         q = np.concatenate((q1.flatten('F'), q2.flatten('F')), axis=0)
@@ -323,8 +357,7 @@ class Pipe1D(DG.DG_1D):
         #q2 = q[-int(len(q) / 2):]
 
 
-
-
+        '''
         benjamin_u = np.genfromtxt('u_initial.csv', delimiter=',', dtype=np.float64)
         ben_xu = benjamin_u[:, 0]
         ben_u = benjamin_u[:, 1]
@@ -384,9 +417,9 @@ class Pipe1D(DG.DG_1D):
         plt.title('Pressure')
         plt.savefig('pressure_comparison')
         plt.show()
-
-        q1 = self.SlopeLimitN(np.reshape(q1,(self.N+1,self.K),'F'))
-        q2 = self.SlopeLimitN(np.reshape(q2,(self.N+1,self.K),'F'))
+        '''
+        #q1 = self.SlopeLimitN(np.reshape(q1,(self.N+1,self.K),'F'))
+        #q2 = self.SlopeLimitN(np.reshape(q2,(self.N+1,self.K),'F'))
 
         t0 = timing.time()
         if implicit:

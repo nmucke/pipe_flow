@@ -380,8 +380,8 @@ class DG_1D:
 
         ux = (2/hN) * np.dot(self.Dr,ul)
 
-        #ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
-        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmod(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0)))
+        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=20,h=self.deltax))
+        #ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmod(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0)))
 
         return ulimit
 
@@ -645,20 +645,11 @@ class Burgers1D(DG_1D):
 
         lm = q
         LFc = np.max(np.maximum((lm[self.vmapM]), (lm[self.vmapP])))
-        #LFc = np.max(np.abs(q))
-        #LFc = 1
+
         qFlux = np.power(q,2)/2
-        #qFlux = q
-        #rhsq = -np.dot(self.S_global,qFlux)-np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)- 0.5*(-qFlux[0]+2*self.bcLeft-qFlux[0])*self.e1 - LFc*0.5*(+q[0]-2*self.bcLeft+q[0])*self.e1
-                # + LFc/2*self.e1BC
-        #rhsq = -np.dot(self.S_global,qFlux)-np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)+ np.dot(self.invM_global,self.bcLeft*self.e1) + np.dot(self.invM_global,LFc*self.bcLeft*self.e1)
+
         rhsq = -np.dot(self.S_global,qFlux)-np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)+ self.e1BC + LFc*self.e1BC - self.eNpKBC + LFc*self.eNpKBC
 
-        #rhsq *= 1/self.deltax
-        #rhsq = (-self.rx * np.dot(self.Dr, qFlux) + np.dot(self.LIFT, self.Fscale * dqFlux))
-        #rhsq = -np.dot(np.dot(self.invM_global,self.G_global),qFlux)-LFc/2*np.dot(np.dot(self.invM_global,self.F_global),q)
-        #rhsq = -np.dot(self.G_global,qFlux)-LFc/2*np.dot(self.F_global,q)
-        #rhsq = np.dot(self.invM_global,rhsq)
         return rhsq
 
     def ExplicitIntegration(self,q,FinalTime):
@@ -675,7 +666,7 @@ class Burgers1D(DG_1D):
 
         resq = np.zeros((self.Np*self.K))
 
-        filterMat =self.Filter1D(self.N, Nc=1, s=100)
+        filterMat =self.Filter1D(self.N, Nc=1, s=1)
 
 
         i = 0
@@ -687,7 +678,7 @@ class Burgers1D(DG_1D):
             dt = CFL * mindeltax / C
 
             for INTRK in range(0, 5):
-                rhsq = self.BurgersRHS1D_global(time, q)
+                rhsq = self.BurgersRHS1D(time, q)
 
                 resq = self.rk4a[INTRK] * resq + dt * rhsq
 
