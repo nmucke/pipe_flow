@@ -73,7 +73,7 @@ class BDF2():
             RHS = -(1 / step_size * (self.alpha[0] * q_old +
                                      self.alpha[1] * q_sol[-1] +
                                      self.alpha[2] * q_sol[-2]) -
-                    self.beta * rhs(self.time, q_old))
+                    self.beta * rhs(t_vec[-1], q_old))
 
             delta_q = np.linalg.solve(LHS, RHS)
 

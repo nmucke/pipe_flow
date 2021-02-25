@@ -48,19 +48,6 @@ class FV_1D():
         self.rk4c = np.array([0.0, 1432997174477.0 / 9575080441755.0, 2526269341429.0 / 6820363962896.0,
                               2006345519317.0 / 3224310063776.0, 2802321613138.0 / 2924317926251.0])
 
-    def minmod(self,a,b):
-
-        sigma = []
-
-        for i in range(len(a)):
-            if np.abs(a[i]) < np.abs(b[i]) and a[i]*b[i] >0:
-                sigma.append(a)
-            elif np.abs(b[i]) < np.abs(a[i]) and a[i]*b[i] >0:
-                sigma.append(b)
-            elif a[i]*b[i]<=0:
-                sigma.append(0)
-
-        return np.asarray(sigma)
 
     def LF_flux(self,u_left,u_right,F_left,F_right,a):
 

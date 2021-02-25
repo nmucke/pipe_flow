@@ -43,6 +43,7 @@ class DG_solver(DG_routines.DG_1D):
                                                       rhs=rhs,
                                                       step_size=step_size)
             q_sol.append(q_new)
+            t_vec.append(t_new)
 
         while t < t_end:
             q_new, t_new = self.integrator_func.update_state(q_sol=q_sol,
