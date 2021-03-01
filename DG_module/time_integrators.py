@@ -9,6 +9,7 @@ class BDF2():
     def __init__(self, stabilizer, max_newton_iter=50, newton_tol=1e-6):
 
         self.stabilizer = stabilizer
+        self.num_states = num_states
 
         self.time = 0
         self.max_newton_iter = max_newton_iter
@@ -58,7 +59,7 @@ class BDF2():
             newton_error = np.max(np.abs(delta_q))
             iterations = iterations + 1
 
-        return self.stabilizer(q_old), time+step_size
+        return self.stabilizer(q_old,self.num_states), time+step_size
 
     def update_state(self, q_sol, t_vec, step_size, rhs):
 
@@ -82,5 +83,43 @@ class BDF2():
             newton_error = np.max(np.abs(delta_q))
             iterations = iterations + 1
 
-        return self.stabilizer(q_old), t_vec[-1]+step_size
+        return self.stabilizer(q_old,self.num_states), t_vec[-1]+step_size
 
+class LowStorageRK():
+    def __init__(self, stabilizer,num_states):
+
+        self.num_states = num_states
+        self.time = 0
+        self.stabilizer = stabilizer
+
+        self.rk4a = np.array([0.0, -567301805773.0 / 1357537059087.0,
+                              -2404267990393.0 / 2016746695238.0,
+                              -3550918686646.0 / 2091501179385.0,
+                              -1275806237668.0 / 842570457699.0])
+
+        self.rk4b = np.array([1432997174477.0 / 9575080441755.0,
+                              5161836677717.0 / 13612068292357.0,
+                              1720146321549.0 / 2090206949498.0,
+                              3134564353537.0 / 4481467310338.0,
+                              2277821191437.0 / 14882151754819.0])
+
+        self.rk4c = np.array([0.0, 1432997174477.0 / 9575080441755.0,
+                              2526269341429.0 / 6820363962896.0,
+                              2006345519317.0 / 3224310063776.0,
+                              2802321613138.0 / 2924317926251.0])
+
+    def update_state(self, q_sol, t_vec, step_size, rhs):
+
+        q_new = q_sol[-1]
+
+        resq = np.zeros(q_new.shape)
+
+        for INTRK in range(0, 5):
+
+            rhsq = rhs(t_vec[-1],q_new)
+
+            resq = self.rk4a[INTRK] * resq + step_size * rhsq
+
+            q_new = q_new + self.rk4b[INTRK] * resq
+
+        return self.stabilizer(q_new,self.num_states), t_vec[-1] + step_size

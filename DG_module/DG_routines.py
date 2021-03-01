@@ -279,6 +279,7 @@ class DG_1D:
 
         # Element size
         self.deltax = np.min(np.abs(self.x[0, :] - self.x[-1, :]))
+        self.dx = np.min(self.x[-self.N:, 0]-self.x[0:-1, 0])
 
         fmask1 = np.where(np.abs(self.r + 1.) < self.NODETOL)[0]
         fmask2 = np.where(np.abs(self.r - 1.) < self.NODETOL)[0]
@@ -297,7 +298,7 @@ class DG_1D:
 
         self.Fscale = 1./(self.J[self.Fmask,:])
 
-    def identity(self,x):
+    def identity(self,x,num_states=1):
         return x
 
     def minmod(self,v):
@@ -338,7 +339,8 @@ class DG_1D:
 
         ux = (2/hN) * np.dot(self.Dr,ul)
 
-        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
+        ulimit = np.ones((self.Np,1))*v0 + (xl-x0)*(self.minmodB(np.stack((ux[0,:],
+            np.divide((vp1-v0),h),np.divide((v0-vm1),h)),axis=0),M=1e-12,h=self.deltax))
 
         return ulimit
 
@@ -370,13 +372,20 @@ class DG_1D:
             uhl[2:(self.Np+1),:] = 0
             ul = np.dot(self.V,uhl)
 
-            ulimit[:,ids] = DG_1D.SlopeLimitLin(self, ul,self.x[:,ids],vkm1[ids],vk[0,ids],vkp1[ids])
+            ulimit[:,ids] = DG_1D.SlopeLimitLin(self, ul,self.x[:,ids],vkm1[ids],
+                                                vk[0,ids],vkp1[ids])
 
         return ulimit
 
-    def apply_slopelimitN(self,q):
+    def apply_slopelimitN(self,q,num_states):
 
-        return self.SlopeLimitN(q)
+        states = []
+        for i in range(num_states):
+            states.append(self.SlopeLimitN(np.reshape(
+                            q[(i*(self.Np*self.K)):((i+1)*(self.Np*self.K))],
+                             (self.Np,self.K),'F')).flatten('F'))
+
+        return np.asarray(states).flatten('F')
 
     def Filter1D(self,N,Nc,s):
         """Initialize 1D filter matrix of size N.
@@ -392,11 +401,16 @@ class DG_1D:
 
         self.filterMat = np.dot(self.V,np.dot(np.diag(filterdiag),self.invV))
 
-    def apply_filter(self,q,):
+    def apply_filter(self,q,num_states):
         """Apply filter to state vector"""
 
-        return np.reshape(np.dot(self.filterMat, np.reshape(q, (self.Np, self.K), 'F'))
-                          ,(self.Np*self.K),'F')
+        states = []
+        for i in range(num_states):
+            states.append(np.dot(self.filterMat,np.reshape(
+                    q[(i * (self.Np * self.K)):((i + 1) * (self.Np * self.K))],
+                    (self.Np, self.K), 'F')).flatten('F'))
+
+        return np.asarray(states).flatten('F')
 
 
 

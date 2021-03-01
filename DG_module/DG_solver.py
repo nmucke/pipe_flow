@@ -8,7 +8,8 @@ import time_integrators
 
 class DG_solver(DG_routines.DG_1D):
     def __init__(self,xmin=0,xmax=1,K=10,N=5,
-                 integrator='BDF2', **stabilizer):
+                 integrator='BDF2', num_states=1,
+                 **stabilizer):
 
         super(DG_solver,self).__init__(xmin=xmin,xmax=xmax,K=K,N=N)
 
@@ -17,7 +18,7 @@ class DG_solver(DG_routines.DG_1D):
             self.Filter1D(N=self.N,Nc=stabilizer['Nc'],s=stabilizer['s'])
             self.stabilizer = self.apply_filter
         elif stabilizer['stabilizer_type'] == 'slope_limit':
-            self.stabilizer = self.SlopeLimitN
+            self.stabilizer = self.apply_slopelimitN
         else:
             self.stabilizer = self.identity
 
@@ -25,9 +26,11 @@ class DG_solver(DG_routines.DG_1D):
         if integrator == 'SSPRK':
             self.integrator_func = 2
         elif integrator == 'LowStorageRK':
-            self.integrator_func = 2
+            self.integrator_func = time_integrators.LowStorageRK(stabilizer=self.stabilizer,
+                                                                 num_states=num_states)
         elif integrator == 'BDF2':
-            self.integrator_func = time_integrators.BDF2(stabilizer=self.stabilizer)
+            self.integrator_func = time_integrators.BDF2(stabilizer=self.stabilizer,
+                                                         num_states=num_states)
 
 
     def solve_pde(self,q_init,t_end,step_size,rhs):
