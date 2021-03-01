@@ -3,6 +3,7 @@ from scipy.special import gamma
 import scipy.special as sci
 import scipy.sparse as sps
 import pdb
+import matplotlib.pyplot as plt
 
 def JacobiP(x,alpha,beta,N):
     """Evaluate jacobi polynomials at x"""
@@ -385,7 +386,7 @@ class DG_1D:
                             q[(i*(self.Np*self.K)):((i+1)*(self.Np*self.K))],
                              (self.Np,self.K),'F')).flatten('F'))
 
-        return np.asarray(states).flatten('F')
+        return np.asarray(states).flatten()
 
     def Filter1D(self,N,Nc,s):
         """Initialize 1D filter matrix of size N.
@@ -410,7 +411,7 @@ class DG_1D:
                     q[(i * (self.Np * self.K)):((i + 1) * (self.Np * self.K))],
                     (self.Np, self.K), 'F')).flatten('F'))
 
-        return np.asarray(states).flatten('F')
+        return np.asarray(states).flatten()
 
 
 
@@ -427,7 +428,7 @@ class DG_1D:
 
         sol_modal = np.dot(self.invV, sol_nodal)
 
-        if x == self.VX:
+        if np.any(x == self.VX):
 
             i_interface = np.argwhere(x == self.VX)
 

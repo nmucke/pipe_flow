@@ -40,48 +40,65 @@ def animateSolution(x,time,sol_list,gif_name='pipe_flow_simulation'):
 K = 100
 N = 5
 
-velocity = .1
-inflow = 1.
+diameter = 0.508
+velocity = 1227
+inflow = 2.
 inflow_noise = 0.01
-Cv = .1
-xl = 0.5
+outPressure = 5e5
+pamb = 1e5
+p0 = 5e5
+rho0 = 870
+Cv = 4.05e1
+xl = 1528
 
 params = {'velocity': velocity,
           'inflow': inflow,
           'inflow_noise': inflow_noise,
+          'outPressure': outPressure,
+          'pamb': pamb,
+          'p0': p0,
+          'rho0': rho0,
+          'diameter': diameter,
           'Cv': Cv,
           'xl': xl}
 error = []
 
-advection_model = DG_models.Advection(xmin=0,xmax=1,K=K,N=N,
+advection_model = DG_models.LinearPipeflow(xmin=0,xmax=5000,K=K,N=N,
                                integrator='LowStorageRK',
                                params=params,
-                               stabilizer_type='filter',Nc=2,s=36
+                               stabilizer_type='filter',Nc=2,s=2
                                )
 
 xVec = np.reshape(advection_model.x, (N + 1) * K, 'F')
 
-FinalTime = 15.
+FinalTime = 5
 
 #mu = 0.4
 #sigma = .075
 #uinit_func = lambda x:1/(sigma*np.sqrt(2*np.pi))*np.exp(-0.5*((x-mu)/sigma)**2) + inflow
+pinit = p0*np.ones(xVec.shape)
 uinit_func = lambda x: inflow*np.ones(x.shape)
 uinit = uinit_func(xVec)
 
+qinit = np.concatenate((pinit,uinit))
 
-u, time = advection_model.solve(uinit, t_end=FinalTime, step_size=0.1)
+q, time = advection_model.solve(qinit, t_end=FinalTime, step_size=0.1)
+q = np.asarray(q)
 
-x = np.linspace(0,1,1000)
+p = []
+u = []
+for i in range(len(time)):
+    p.append(q[i,0:((N+1)*K)])
+    u.append(q[i,-((N+1)*K):])
 
-u_end = advection_model.EvaluateSol(x,np.reshape(u[-1],(N+1,K),'F'))
-
+#x = np.linspace(0,1,1000)
+#u_end = advection_model.EvaluateSol(x,np.reshape(u[-1],(N+1,K),'F'))
 plt.figure()
 plt.plot(xVec,uinit,linewidth=2,label='u init')
-plt.plot(x,u_end,linewidth=2,label='u approx')
+plt.plot(xVec,u[-1],linewidth=2,label='u approx')
 plt.show()
 
-animateSolution(xVec,time[0:-1:3],u[0:-1:3],gif_name='adv_simulation')
+animateSolution(xVec,time[0:-1:50],u[0:-1:50],gif_name='linear_pipe_simulation')
 
 
 

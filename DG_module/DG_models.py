@@ -2,6 +2,7 @@ import numpy as np
 import pdb
 import DG_solver
 import DG_routines
+import matplotlib.pyplot as plt
 
 
 class Advection(DG_solver.DG_solver):
@@ -144,7 +145,7 @@ class Advection(DG_solver.DG_solver):
 
 class LinearPipeflow(DG_solver.DG_solver):
     def __init__(self, xmin=0,xmax=1,K=10,N=5,
-                 integrator='BDF2',num_states=1,
+                 integrator='BDF2',num_states=2,
                  params=None,**stabilizer,
                  ):
 
@@ -161,8 +162,11 @@ class LinearPipeflow(DG_solver.DG_solver):
         self.pamb = params['pamb']
         self.p0 = params['p0']
         self.rho0 = params['rho0']
-        self.A = params['A']
+        self.diameter = params['diameter']
+        self.A = np.pi*(self.diameter/2)**2
 
+        self.epsFriction = 1e-8
+        self.mu = xmax/2
 
         self.Cv = params['Cv']
         self.xl = params['xl']
@@ -173,11 +177,11 @@ class LinearPipeflow(DG_solver.DG_solver):
     def BoundaryConditions(self,time,q1,q2):
         '''Set boundary conditions'''
 
-        q1in = q1[0]
-        q1out = self.outPressure
+        q1in = q1[self.vmapI]
+        q1out = q1[self.vmapO]#self.outPressure
 
         q2in = self.inflow + self.BC_noise
-        q2out = q2[-1]
+        q2out = q2[self.vmapO]
 
         return q1in, q1out, q2in, q2out
 
@@ -189,7 +193,6 @@ class LinearPipeflow(DG_solver.DG_solver):
         rl = 2 * (self.xl - self.VX[xElementL]) / self.deltax - 1
         for i in range(0, self.N + 1):
             l[i] = DG_routines.JacobiP(np.array([rl]), 0, 0, i)
-
         l = np.linalg.solve(np.transpose(self.V), l)
 
         pressureL = np.reshape(pressure, (self.Np, self.K), 'F')
@@ -199,8 +202,14 @@ class LinearPipeflow(DG_solver.DG_solver):
 
         discharge_sqrt_coef = (pressureL - self.pamb) * rhoL
         f_l[:, xElementL] = self.Cv * np.sqrt(discharge_sqrt_coef) * l
-
         return f_l
+
+    def Friction(self,q2,rho):
+        Red = rho * self.diameter * np.abs(q2) / self.mu
+        f_friction = 0.25 * 1 / ((-1.8 * np.log10((self.epsFriction /
+                               self.diameter / 3.7) ** 1.11 + 6.9 / Red)) ** 2)
+        friction_term = 0.5*self.diameter*np.pi * f_friction * rho * q2 * q2
+        return friction_term
 
     def rhs(self,time,q):
 
@@ -209,14 +218,15 @@ class LinearPipeflow(DG_solver.DG_solver):
         q1 = q[0:int(self.Np*self.K)]
         q2 = q[-int(self.Np*self.K):]
 
+        
         # Compute eigenvalue
         lm = self.u0 + self.velocity
 
         #Compute LFc
-        LFc = np.abs(lm)
+        LFc = np.max(np.abs(lm))
 
         # q1 flux
-        q1Flux = self.velocity*q1 + self.K0*q2
+        q1Flux = self.u0*q1 + self.K0*q2
         dq1 = q1[self.vmapM] - q1[self.vmapP]
 
         dq1Flux = q1Flux[self.vmapM] - q1Flux[self.vmapP]
@@ -233,9 +243,9 @@ class LinearPipeflow(DG_solver.DG_solver):
         q1in, q1out, q2in, q2out = self.BoundaryConditions(time,q1,q2)
 
         # Inflow conditions
-        q1FluxIn = self.velocity*q1in + self.K0*q2in
-        q2FluxIn = 1/self.rho0*q1in + self.u0*q2in
-        lmIn = np.abs(lm) / 2
+        q1FluxIn = self.u0[self.vmapI]*q1in + self.K0*q2in
+        q2FluxIn = 1/self.rho0*q1in + self.u0[self.vmapI]*q2in
+        lmIn = np.abs(lm[self.vmapI]) / 2
         nxIn = nx[self.mapI]
         dq1Flux[self.mapI] = nxIn * (q1Flux[self.vmapI] - q1FluxIn) / 2 \
                             - lmIn * (q1[self.vmapI] - q1in)
@@ -243,13 +253,13 @@ class LinearPipeflow(DG_solver.DG_solver):
                             - lmIn * (q2[self.vmapI] - q2in)
 
         # Outflow conditions
-        q1FluxOut = self.velocity * q1out + self.K0 * q2out
-        q2FluxOut = 1 / self.rho0 * q1out + self.u0 * q2out
-        lmOut = np.abs(lm) / 2
+        q1FluxOut = self.u0[self.vmapO]* q1out + self.K0 * q2out
+        q2FluxOut = 1 / self.rho0 * q1out + self.u0[self.vmapI] * q2out
+        lmOut = np.abs(lm[self.vmapO]) / 2
         nxOut = nx[self.mapO]
-        dq1Flux[self.mapI] = nxOut * (q1Flux[self.vmapO] - q1FluxOut) / 2 \
+        dq1Flux[self.mapO] = nxOut * (q1Flux[self.vmapO] - q1FluxOut) / 2 \
                              - lmOut * (q1[self.vmapO] - q1out)
-        dq2Flux[self.mapI] = nxOut * (q2Flux[self.vmapO] - q2FluxOut) / 2 \
+        dq2Flux[self.mapO] = nxOut * (q2Flux[self.vmapO] - q2FluxOut) / 2 \
                              - lmOut * (q2[self.vmapO] - q2out)
         ######
 
@@ -260,28 +270,78 @@ class LinearPipeflow(DG_solver.DG_solver):
         dq1Flux = np.reshape(dq1Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
         dq2Flux = np.reshape(dq2Flux, ((self.Nfp * self.Nfaces, self.K)), 'F')
 
-        # Compute leakage
-        f_l = self.Leakage(time, self.xElementL)
+        # Compute leakage and friction
+        rho = self.rho0 + 1/(self.velocity**2) * (q1-self.p0)
+        leakage_term = self.Leakage(time, self.xElementL, pressure=q1, rho=rho)
+        friction_term = self.Friction(q2, rho)
 
         # Compute RHS
         rhsq1 = - self.rx * np.dot(self.Dr, q1Flux) \
-               + np.dot(self.LIFT, self.Fscale * dq1Flux) \
-               - self.rx * f_l
+                + np.dot(self.LIFT, self.Fscale * dq1Flux) \
+                - leakage_term
         rhsq2 = - self.rx * np.dot(self.Dr, q2Flux) \
-               + np.dot(self.LIFT, self.Fscale * dq2Flux) \
+                + np.dot(self.LIFT, self.Fscale * dq2Flux) \
+                - np.reshape(friction_term, (self.Np, self.K))
 
         rhsq1 = rhsq1.flatten('F')
         rhsq2 = rhsq2.flatten('F')
 
         return np.concatenate((rhsq1,rhsq2))
 
+    def compute_jacobian(self,time,U,state_len,rhs):
+
+        epsilon = np.finfo(float).eps
+
+        J = np.zeros((state_len,state_len))
+
+        F = rhs(time,U)
+        for col in range(state_len):
+            pert = np.zeros(state_len)
+            pert_jac = np.sqrt(epsilon) * np.maximum(np.abs(U[col]), 1)
+            pert[col] = pert_jac
+
+            Upert = U + pert
+
+            Fpert = rhs(time,Upert)
+
+            J[:,col] = (Fpert - F) / pert_jac
+
+        return J
+    
+    def newton_solver(self, time, q, rhs):
+        self.state_len = q.shape[0]
+
+        self.J = self.compute_jacobian(time, q, self.state_len, rhs)
+        LHS = self.J
+
+        newton_error = 1e2
+        iterations = 0
+        q_old = q
+        while newton_error > 1e-6 and \
+                iterations < 50:
+            RHS = -rhs(time, q_old)
+            print(newton_error)
+
+            delta_q = np.linalg.solve(LHS, RHS)
+
+            q_old = q_old + delta_q
+
+            newton_error = np.max(np.abs(delta_q))
+            iterations = iterations + 1
+        return q_old
+
     def solve(self,q_init,t_end,step_size):
         """Solve PDE from given initial condition"""
+
+        self.u0 = q_init[-(self.Np*self.K):]
+        self.K0 = self.rho0*self.velocity**2
+
+        q_init = self.newton_solver(0, q_init, self.rhs)
+        pdb.set_trace()
+
         q_sol = [q_init]
         t_vec = [0]
 
-        self.u0 = 0
-        self.K0 = self.rho0*self.velocity**2
 
         t = 0
 
@@ -300,8 +360,8 @@ class LinearPipeflow(DG_solver.DG_solver):
 
             if self.integrator == 'LowStorageRK':
 
-                C = self.u0 + self.velocity
-                CFL = 0.8
+                C = np.max(self.u0 + self.velocity)
+                CFL = 0.5
                 step_size = CFL * self.dx/C
 
                 q_new, t_new = self.integrator_func.update_state(q_sol=q_sol,
@@ -313,7 +373,6 @@ class LinearPipeflow(DG_solver.DG_solver):
                                                                  t_vec=t_vec,
                                                                  step_size=step_size,
                                                                  rhs=self.rhs)
-
 
             t = t_new
 

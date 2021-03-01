@@ -4,6 +4,7 @@ import scipy.special as sci
 import scipy.sparse as sps
 import pdb
 import DG_routines
+import matplotlib.pyplot as plt
 
 class BDF2():
     def __init__(self, stabilizer, max_newton_iter=50, newton_tol=1e-6):
