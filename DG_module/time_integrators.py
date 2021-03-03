@@ -123,4 +123,35 @@ class LowStorageRK():
 
             q_new = q_new + self.rk4b[INTRK] * resq
 
-        return self.stabilizer(q_new,self.num_states), t_vec[-1] + step_size
+            q_new = self.stabilizer(q_new,self.num_states)
+
+        return q_new, t_vec[-1] + step_size
+
+class SSPRK():
+    def __init__(self, stabilizer,num_states):
+
+        self.num_states = num_states
+        self.time = 0
+        self.stabilizer = stabilizer
+
+        self.a = np.array([[1, 0, 0],
+                               [3/4, 1/4, 0],
+                               [1/3, 0, 2/3]])
+        self.b = np.array([1, 1/4, 2/3])
+        self.c = np.array([0, 1, 1/2])
+
+    def update_state(self, q_sol, t_vec, step_size, rhs):
+
+        q_new = self.a[0,0]*q_sol[-1] + \
+             self.b[0]*step_size*rhs(t_vec[-1] + self.c[0]*step_size,q_sol[-1])
+        q_new = self.stabilizer(q_new,self.num_states)
+
+        q_new = self.a[1,0]*q_sol[-1] + self.a[1,1]*q_new + \
+            self.b[1]*step_size*rhs(t_vec[-1] + self.c[1]*step_size,q_new)
+        q_new = self.stabilizer(q_new,self.num_states)
+
+        q_new = self.a[2,0]*q_sol[-1] + self.a[2,2]*q_new + \
+            self.b[2]*step_size*rhs(t_vec[-1] + self.c[2]*step_size,q_new)
+        q_new = self.stabilizer(q_new,self.num_states)
+
+        return q_new, t_vec[-1] + step_size
